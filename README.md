@@ -4,11 +4,11 @@ This repository collects notes, analysis, and data artifacts related to the RTKL
 
 ## Contents
 
-- [HANDOFF.md](HANDOFF.md) — project handoff notes and next steps
-- [rtk-claude-code-briefing2.md](rtk-claude-code-briefing2.md) — working brief and task context
-- [rtk-delivery-path-summary.md](rtk-delivery-path-summary.md) — delivery and execution summary
-- [rtk-rtklib-research-notes.md](rtk-rtklib-research-notes.md) — research notes on RTKLIB and fork relationships
-- [rtklib-claude-code-briefing.md](rtklib-claude-code-briefing.md) — earlier planning notes
+- [docs/HANDOFF.md](docs/HANDOFF.md) — project handoff notes and next steps
+- [docs/rtk-claude-code-briefing2.md](docs/rtk-claude-code-briefing2.md) — working brief and task context
+- [docs/rtk-delivery-path-summary.md](docs/rtk-delivery-path-summary.md) — delivery and execution summary
+- [docs/rtk-rtklib-research-notes.md](docs/rtk-rtklib-research-notes.md) — research notes on RTKLIB and fork relationships
+- [docs/rtklib-claude-code-briefing.md](docs/rtklib-claude-code-briefing.md) — earlier planning notes
 
 ## Repository Notes
 
