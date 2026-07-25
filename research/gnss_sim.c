@@ -37,15 +37,25 @@
  *          Writes files plus .tag time tags for paced replay.
  *
  *   live:  gnss_sim <nav> <base_ecef> --live <:baseport> <:roverport> [rate]
- *          Reads "lat,lon,height" (deg, deg, m) from stdin, one line per
- *          epoch, and serves each stream over TCP for RTKLIB to connect to. This is what closes the loop: the vehicle's
- *          own position becomes the observations RTKLIB solves, so a corrupted
+ *          Serves both streams over TCP for RTKLIB to connect to, emitting
+ *          epochs at `rate` Hz off its own clock. "lat,lon,height" (deg, deg,
+ *          m) lines on stdin move the rover; until one arrives it sits at the
+ *          base coordinate. This is what closes the loop: the vehicle's own
+ *          position becomes the observations RTKLIB solves, so a corrupted
  *          base coordinate propagates back into the vehicle's control loop.
+ *
+ *          The position feed must NOT drive the epoch clock. In the closed
+ *          loop that feed comes from the vehicle, the vehicle needs a GPS fix
+ *          to exist, and that fix comes from these observables -- so an
+ *          epoch-per-line design deadlocks on startup with every stage waiting
+ *          on the one downstream of it. Free-running from the base coordinate
+ *          gives the chain something to converge on before the vehicle exists.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <pthread.h>
 #include "rtklib.h"
 
 int showmsg(const char *format, ...) { (void)format; return 0; }
@@ -65,6 +75,37 @@ typedef struct {
 static int parse_xyz(const char *s, double *p)
 {
     return sscanf(s, "%lf,%lf,%lf", p, p + 1, p + 2) == 3;
+}
+
+/*
+ * Live-mode position feed. Read on its own thread so a slow, stalled or
+ * absent feed cannot hold up the epoch clock -- the streams must keep flowing
+ * for the consumer to hold a fix, whatever the vehicle is doing.
+ */
+static struct {
+    pthread_mutex_t lock;
+    double llh[3];       /* latest position, degrees / metres */
+    int n;               /* positions accepted */
+    int eof;             /* feed closed */
+} feed = { PTHREAD_MUTEX_INITIALIZER, {0}, 0, 0 };
+
+static void *pos_reader(void *arg)
+{
+    char line[256];
+    double llh[3];
+
+    (void)arg;
+    while (fgets(line, sizeof(line), stdin)) {
+        if (sscanf(line, "%lf,%lf,%lf", llh, llh + 1, llh + 2) != 3) continue;
+        pthread_mutex_lock(&feed.lock);
+        memcpy(feed.llh, llh, sizeof(llh));
+        feed.n++;
+        pthread_mutex_unlock(&feed.lock);
+    }
+    pthread_mutex_lock(&feed.lock);
+    feed.eof = 1;
+    pthread_mutex_unlock(&feed.lock);
+    return NULL;
 }
 
 /* Pick the ephemeris for `sat` whose toe is nearest `t`. */
@@ -233,6 +274,13 @@ int main(int argc, char **argv)
             fprintf(stderr, "epochs and rate must be positive\n");
             return 1;
         }
+        /* ":5901" is a port, not a filename. Catching it here stops a
+         * misplaced --live from quietly writing files called ":5901". */
+        if (base_out[0] == ':' || rover_out[0] == ':') {
+            fprintf(stderr, "batch output looks like a port -- "
+                            "did you mean --live?\n");
+            return 1;
+        }
     }
 
     if (!readrnx(argv[1], 1, "", NULL, &nav, NULL) || nav.n <= 0) {
@@ -341,17 +389,36 @@ int main(int argc, char **argv)
                      timeadd(t0, live ? 300.0 : epochs / rate / 2.0));
 
     if (live) {
-        char line[256];
-        fprintf(stderr, "live mode: reading lat,lon,height from stdin\n");
-        nep = 0;
-        while (fgets(line, sizeof(line), stdin)) {
+        pthread_t reader;
+        unsigned int start;
+        int fed = 0;
+
+        fprintf(stderr, "live mode: %.1f Hz, rover follows stdin "
+                "(base coordinate until fed)\n", rate);
+        pthread_create(&reader, NULL, pos_reader, NULL);
+
+        start = tickget();
+        for (nep = 0; ; nep++) {
             double llh[3], xyz[3];
-            int n;
-            if (sscanf(line, "%lf,%lf,%lf", llh, llh + 1, llh + 2) != 3) continue;
-            llh[0] *= D2R;
-            llh[1] *= D2R;
-            pos2ecef(llh, xyz);
-            for (i = 0; i < 3; i++) rover.pos[i] = xyz[i];
+            int n, eof, elapsed, due;
+
+            pthread_mutex_lock(&feed.lock);
+            eof = feed.eof;
+            if (feed.n != fed) {
+                fed = feed.n;
+                memcpy(llh, feed.llh, sizeof(llh));
+                pthread_mutex_unlock(&feed.lock);
+                llh[0] *= D2R;
+                llh[1] *= D2R;
+                pos2ecef(llh, xyz);
+                for (i = 0; i < 3; i++) rover.pos[i] = xyz[i];
+            } else {
+                pthread_mutex_unlock(&feed.lock);
+            }
+            /* Stop when a feed that was delivering positions closes -- the
+             * flight is over. A feed that never delivered anything is a
+             * standalone run (stationary rover), so keep serving. */
+            if (eof && fed) break;
 
             t = timeadd(t0, nep / rate);
 
@@ -368,16 +435,21 @@ int main(int argc, char **argv)
             if ((n = gen_epoch(&base, &rover, &nav, t, lam))) {
                 nobs_total += n;
             }
-            nep++;
-            if (nep % 50 == 0) {
+            if ((nep + 1) % 50 == 0) {
                 double bl[3];
                 for (i = 0; i < 3; i++) bl[i] = rover.pos[i] - base.pos[i];
-                fprintf(stderr, "  epoch %d, baseline %.2f m, %d sats\n",
-                        nep, norm(bl, 3), n);
+                fprintf(stderr, "  epoch %d, baseline %.2f m, %d sats, "
+                        "%d positions fed\n", nep + 1, norm(bl, 3), n, fed);
             }
+
+            /* Pace against the start tick rather than sleeping a fixed
+             * interval, so per-epoch work does not accumulate as drift. */
+            due = (int)((nep + 1) * 1000.0 / rate);
+            elapsed = (int)(tickget() - start);
+            if (due > elapsed) sleepms(due - elapsed);
         }
-        fprintf(stderr, "live mode ended after %d epochs (%d obs)\n",
-                nep, nobs_total);
+        fprintf(stderr, "live mode ended after %d epochs (%d obs, "
+                "%d positions fed)\n", nep, nobs_total, fed);
     } else {
         double bl[3];
         for (i = 0; i < 3; i++) bl[i] = rover.pos[i] - base.pos[i];

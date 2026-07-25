@@ -163,6 +163,11 @@ def main():
     ap.add_argument("--hold", type=float, default=30.0)
     ap.add_argument("--attack", type=float, default=45.0)
     ap.add_argument("--goto-time", type=float, default=60.0)
+    ap.add_argument("--no-glitch", action="store_true",
+                    help="fly the profile but inject nothing. For the closed "
+                         "loop, where the offset arrives as a malicious 1033 "
+                         "in the correction stream and applying a glitch here "
+                         "as well would double-count it.")
     args = ap.parse_args()
 
     v = Vehicle(args.conn)
@@ -193,12 +198,16 @@ def main():
     v.settle(args.hold, "clean",
              resend=lambda: v.goto(hold_lat, hold_lon, TAKEOFF_ALT))
 
-    dn, de = metres(D_LAT, D_LON, HOME_LAT)
-    print(f"\nphase 2: ATTACK -- GPS glitch N={dn:+.2f} m E={de:+.2f} m "
-          f"(|{math.hypot(dn, de):.2f} m| horizontal)")
-    v.set_param("SIM_GPS1_GLTCH_X", D_LAT)
-    v.set_param("SIM_GPS1_GLTCH_Y", D_LON)
-    v.set_param("SIM_GPS1_GLTCH_Z", D_ALT)
+    if args.no_glitch:
+        print(f"\nphase 2: holding {args.attack:.0f}s -- no glitch applied "
+              f"here; the offset arrives in the correction stream")
+    else:
+        dn, de = metres(D_LAT, D_LON, HOME_LAT)
+        print(f"\nphase 2: ATTACK -- GPS glitch N={dn:+.2f} m E={de:+.2f} m "
+              f"(|{math.hypot(dn, de):.2f} m| horizontal)")
+        v.set_param("SIM_GPS1_GLTCH_X", D_LAT)
+        v.set_param("SIM_GPS1_GLTCH_Y", D_LON)
+        v.set_param("SIM_GPS1_GLTCH_Z", D_ALT)
     v.settle(args.attack, "attack",
              resend=lambda: v.goto(hold_lat, hold_lon, TAKEOFF_ALT))
 
@@ -207,11 +216,17 @@ def main():
     # step offset produces no physical movement. Navigating to a coordinate is
     # the case that matters -- the aircraft flies until it BELIEVES it is at
     # the waypoint, so a lying GPS puts it somewhere else in the real world.
+    # Anchored to where the aircraft actually is, not to the module constants:
+    # those are the RINEX site, and the closed loop flies wherever its base
+    # station is. A waypoint 3 km away is not a miss-distance measurement.
+    wp_lat = hold_lat + WP_NORTH_M / 111320.0
+    wp_lon = hold_lon
     print(f"\nphase 3: navigate to a waypoint {WP_NORTH_M:.0f} m north "
           f"while the GPS is still lying")
-    v.goto(WP_LAT, WP_LON, TAKEOFF_ALT)
+    print(f"waypoint: {wp_lat:.9f},{wp_lon:.9f}")   # parse_sitl_log --target
+    v.goto(wp_lat, wp_lon, TAKEOFF_ALT)
     v.settle(args.goto_time, "goto",
-             resend=lambda: v.goto(WP_LAT, WP_LON, TAKEOFF_ALT))
+             resend=lambda: v.goto(wp_lat, wp_lon, TAKEOFF_ALT))
 
     print("\nland")
     v.mode("LAND")
