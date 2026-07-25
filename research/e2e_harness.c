@@ -14,7 +14,7 @@
  * server is actually using (svr.rtk.rb).
  *
  * Usage:
- *   e2e_harness <rover> <base> [seconds] [speed] [file|serial]
+ *   e2e_harness <rover> <base> [seconds] [speed] [file|serial|tcp]
  *
  * With "serial" the two arguments are RTKLIB serial paths
  * (port:baud:bits:parity:stop:fctrl) instead of files, so the same attack can
@@ -81,7 +81,7 @@ int main(int argc, char **argv)
     prcopt.refpos  = POSOPT_RTCM;   /* <- base position from RTCM */
     prcopt.rovpos  = POSOPT_SINGLE;
 
-    if (serial) {
+    if (serial || (argc >= 6 && !strcmp(argv[5], "tcp"))) {
         /* Paths are used verbatim; an external feeder paces the bytes. */
         snprintf(rovpath, sizeof(rovpath), "%s", argv[1]);
         snprintf(basepath, sizeof(basepath), "%s", argv[2]);
@@ -93,14 +93,25 @@ int main(int argc, char **argv)
         snprintf(basepath, sizeof(basepath), "%s::T::x%d", argv[2], speed);
     }
 
-    strs[0] = serial ? STR_SERIAL : STR_FILE;
-    strs[1] = serial ? STR_SERIAL : STR_FILE;
+    if (!strcmp(argv[argc > 5 ? 5 : 1], "tcp") ||
+        (argc >= 6 && !strcmp(argv[5], "tcp"))) {
+        strs[0] = strs[1] = STR_TCPCLI;
+    } else {
+        strs[0] = serial ? STR_SERIAL : STR_FILE;
+        strs[1] = serial ? STR_SERIAL : STR_FILE;
+    }
     paths[0] = rovpath;  formats[0] = STRFMT_RTCM3;
     paths[1] = basepath; formats[1] = STRFMT_RTCM3;
     for (i = 2; i < 8; i++) { strs[i] = STR_NONE; paths[i] = (char *)""; }
     if (getenv("NMEA_OUT")) {
         strs[3] = STR_FILE;              /* solution output 1 */
         paths[3] = getenv("NMEA_OUT");
+    }
+    /* NMEA_TCP=:port serves the solution so an autopilot can connect to it. */
+    if (getenv("NMEA_TCP")) {
+        solopt[0].posf = SOLF_NMEA;
+        strs[3] = STR_TCPSVR;
+        paths[3] = getenv("NMEA_TCP");
     }
 
     for (i = 0; i < 3; i++) rcvopts[i] = ropt[i];
