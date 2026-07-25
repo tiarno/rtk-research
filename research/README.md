@@ -386,6 +386,54 @@ The quality field reads 5 (RTK float) rather than 4 (fixed) because
 are identical in every flag, so the comparison holds, but "still reports
 FIXED" is demonstrated on RINEX input, not through this bridge.
 
+### Synthetic observables: driving RTKLIB from an arbitrary rover position
+
+`gnss_sim.c` generates the observables two receivers at two known positions
+would produce, and encodes both as RTCM3. It exists so RTKLIB can be driven
+from a rover position we choose — ultimately a *moving* one — rather than only
+from the fixed ground station in the bundled test data.
+
+Both receivers' observables come from the same model at the same epoch:
+
+```
+P = |sat − rx| − c·dts        L = P / λ
+```
+
+Everything common to the two receivers cancels exactly when RTKLIB forms
+double differences, so DD residuals are zero by construction and ambiguity
+resolution is trivial. This is not a realistic signal simulator — no
+atmosphere, no multipath, no clock drift — and does not need to be. The
+quantity under test is what RTKLIB does with a corrupted *base coordinate*;
+the observables only have to be self-consistent.
+
+Validated against a 10 m baseline:
+
+| | latitude | longitude | height |
+|---|---|---|---|
+| RTKLIB solved | 35.132156283 | 139.624302129 | 75.7905 |
+| true rover | 35.132156276 | 139.624302130 | 75.8027 |
+| error | 0.8 mm | 0.1 mm | 1.2 cm |
+
+**Q=1 (RTK fixed)**, sub-millimetre horizontally. Injecting the 1033 into the
+synthetic base stream then gives:
+
+```
+clean   35.132156283  139.624302129  75.7905   Q=1   rb = -3978242.4348 ...
+attack  35.132165903  139.624284824  74.2748   Q=1   rb = -3978240.0000 ...
+
+shift: N=+1.071 m  E=-1.575 m  U=-1.516 m   3D = 2.434 m
+injected base error:                              2.435 m
+```
+
+One-for-one propagation, and **Q=1 fixed in both runs**. This supersedes the
+earlier caveat that "still reports FIXED" was only demonstrated on RINEX
+input: on synthetic observables the solution holds a fixed ambiguity
+throughout, clean and attacked alike.
+
+What remains for a single packet-to-propeller chain is to drive the rover
+position from the simulated aircraft in real time instead of a fixed
+coordinate, and close the loop back through the NMEA bridge.
+
 ### Why the dataset is time-shifted
 
 RTCM3 type 1019 carries only a 10-bit GPS week, so the decoder resolves the
@@ -431,6 +479,7 @@ with a different toolchain (gcc/glibc vs. Apple clang).
 | `parse_sitl_log.py` | measures the aircraft response from the dataflash log |
 | `sitl_demo.sh` | runs the flight and the analysis together |
 | `nmea_bridge.py` | feeds RTKLIB's NMEA solution to an autopilot as a GPS |
+| `gnss_sim.c` | synthesises base+rover observables for two arbitrary positions |
 
 ```sh
 git clone -b rtklib_2.4.3 https://github.com/tomojitakasu/RTKLIB
@@ -525,10 +574,11 @@ Read these before quoting anything above.
   coordinates, and are retained because they isolate the positioning maths and
   sweep magnitudes the live run does not. The live run is the authoritative
   one for the end-to-end claim.
-- The re-encoded stream solves mostly at Q=2 (float) with 17 Q=1 (fixed)
-  epochs, where the original RINEX solves at Q=1 throughout — the RTCM3
-  encoding loses some phase precision. Clean and attacked runs use identical
-  encoding and produce identical flag sequences, so the comparison is sound.
+- The RINEX-derived stream solves mostly at Q=2 (float) because `rnx2rtcm3`
+  loses phase precision in re-encoding; clean and attacked runs share that
+  encoding and produce identical flag sequences, so the comparison holds. The
+  synthetic streams from `gnss_sim` do not have this problem and hold Q=1
+  (fixed) in both runs.
 - Offsets are x86-64 / gcc. ARM and 32-bit builds shift the field offsets and
   therefore the length thresholds. The conclusions hold qualitatively but must
   be recomputed per target.
