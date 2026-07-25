@@ -30,3 +30,9 @@ htmlcov/
 .DS_Store
 .ipynb_checkpoints/
 *.log
+
+# research/ build + generated artifacts
+research/harness
+research/*.bin
+research/*.o
+research/trace

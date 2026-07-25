@@ -10,17 +10,36 @@ This document captures the current state of the RTKLIB research workspace, inclu
 - Document the key RTKLIB relationships and findings.
 - Keep the repository organized and easy to navigate.
 
-## Network Interpretation
+## Network Interpretation — RETRACTED
 
-The RTKLIB fork network appears to be organized around a small number of highly influential repositories rather than a broad, evenly distributed ecosystem. The graph contains 516 nodes and 516 edges, indicating a sparse branching structure with many peripheral forks and only a few central hubs.
+An earlier version of this document claimed that `rtklibexplorer/RTKLIB` is the
+dominant hub of the fork network, with upstream "clearly secondary." **That
+conclusion is withdrawn — it was an artifact of an incomplete crawl, not a
+property of the ecosystem.**
 
-The most important node is rtklibexplorer/RTKLIB, which has by far the highest degree and betweenness centrality. That indicates it acts as a major connector between many other nodes in the network. The upstream repository, tomojitakasu/RTKLIB, is also important, but it is clearly secondary to this dominant hub.
+Two defects produced it:
 
-This suggests the network is less like a flat forest of forks and more like a hub-and-spoke structure centered on one dominant fork, with the original repository acting as a secondary anchor. Most of the remaining forks have much lower degree and centrality, meaning they are mostly peripheral branches rather than strategic intermediaries.
+1. **Truncated crawl.** `get_forks()` in `rtklib_fork_network.py` assigns
+   `CACHE[repo_id] = batch` inside the pagination loop, so each page overwrites
+   the previous one, and a cache *hit* short-circuits the crawl entirely. The
+   resulting graph covers ~6% of upstream's ~1,800 forks (and the oldest ones,
+   since the API call sorts by `oldest`) against ~100% of rtklibexplorer's 367.
+   The hub was manufactured by the sampling.
+2. **Centrality is meaningless on this graph.** GitHub fork graphs are trees —
+   every fork has exactly one parent. Betweenness centrality on a tree is a
+   monotone function of subtree size, so it cannot surface a chokepoint that
+   simple descendant-counting would miss. The extraction → graph → centrality
+   pipeline borrowed from the ALPR/sanctions work does not transfer here.
+
+Separately, fork count measures curiosity, not deployment: a fork is one click,
+and most are never touched again.
+
+The fork-mapping line of work has been **dropped**. `rtklib_fork_network.py`,
+`rtklib_fork_cache.json`, `rtklib_fork_graph.graphml`, and
+`rtklib_seed_nodes.csv` are retained only as a record of the attempt. Do not
+cite any figure from them.
 
 ## Suggested Next Steps
 
-1. Summarize findings in a concise executive note.
-2. Add any reusable analysis scripts or notebooks.
-3. Continue refining the graph and related documentation.
-4. Investigate the most central forks for downstream impact and maintenance risk.
+See [research/README.md](../research/README.md) — the project has moved to
+direct analysis of the RTKLIB RTCM3 decoder.

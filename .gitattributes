@@ -1,0 +1,8 @@
+# These are run under WSL/Linux. Checking them out with CRLF breaks them with
+# "$'\r': command not found" / "syntax error: unexpected end of file", which is
+# not an obvious failure mode. Force LF regardless of core.autocrlf.
+*.sh   text eol=lf
+*.py   text eol=lf
+*.c    text eol=lf
+*.h    text eol=lf
+*.md   text eol=lf
