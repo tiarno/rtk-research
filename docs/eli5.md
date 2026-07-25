@@ -63,6 +63,13 @@ the legitimate signal keeps working normally.
 a valid format, and an ordinary size. Anything inspecting the link sees a
 perfectly well-formed message about an antenna.
 
+One message is enough to *cause* the error, but not always to *keep* it. The
+real base station repeats its true coordinates every few seconds, which quietly
+repairs the damage — so to hold the lie you send your message again after each
+repair. That is still nothing special on the link: an extra antenna message
+among the ordinary traffic, a few times a minute. (On builds where the message
+crashes the receiver instead, once is enough.)
+
 **3. The rover's software overwrites its own base-station coordinates.**
 The oversized "antenna name" spills past its box and erases part of the number
 holding the base station's position. The base is now believed to be about two
@@ -116,6 +123,11 @@ Worth noting: Demo5 released a new version **13 days after this bug was made
 public**, and it still contains it. The original project hasn't been updated
 since 2020.
 
+Nor is a fix coming. The bug reports have sat open and unanswered since June
+2026 — the person who reported them offered to file the paperwork for an
+official vulnerability ID and got no reply. "Wait for the patch" is not advice
+that means anything on a project nobody is maintaining.
+
 ## What is new here
 
 A security firm (FuzzingLabs) found and reported the overflow in June 2026.
@@ -132,17 +144,33 @@ which way — and what an aircraft then does about it.
 No real GPS hardware and no real aircraft were involved. This is all software
 on a laptop.
 
-**The chain above has one join in it.** Steps 1–5 were measured as one
-continuous run: a real malicious message goes into the real GPS software, over
-a real serial link, and a wrong position comes out the far side as standard GPS
-sentences that a flight controller accepts and locks onto. Step 6 was measured
-separately — the flight simulator is *given* a position error of the same size
-rather than receiving it from the GPS software.
+**Steps 1–5 were measured as one continuous run.** A real malicious message
+goes into the real GPS software, over a real serial link, and a wrong position
+comes out the far side as standard GPS sentences that a flight controller
+accepts and locks onto.
 
-Closing that last join needs the GPS software to be fed satellite measurements
-from wherever the aircraft actually is, which means either simulating those
-measurements or using a real receiver under a real sky. Neither is done yet.
+**Step 6 is the one to be careful about.** The 1.9 metre figures above come
+from a separate test, in which the flight simulator is *given* a position error
+of that size rather than receiving it from the GPS software.
 
-Only a multirotor was tested, only holding position and flying a short leg.
-Tractors, boats, fixed-wing aircraft and survey workflows are untested, as is
-any behaviour when the error is ramped in slowly rather than applied at once.
+The two halves have since been joined. The simulated aircraft's own position is
+turned into satellite measurements, fed to the GPS software, and the answer
+handed back to the aircraft as its only GPS — so the aircraft flies on a
+position it computed from the attacker's message. In that setup a drone armed,
+took off, flew and landed while its GPS was lying to it by the injected two
+metres, and the lie arrived only as one extra message on the correction link.
+Nothing was fed in by hand.
+
+**But how far that drone ended up from where it should be is not yet a usable
+number.** Our test rig has a lag in it: the aircraft's position takes too long
+to travel around the loop and come back as GPS. That lag on its own makes the
+aircraft wobble, and the wobble grows until it wanders off — attack or no
+attack. Any distance measured that way is measuring our rig, not the attack. So
+the 1.9 metre figures stand, and the closed-loop ones do not exist yet.
+
+Two further limits. The correction link has to be carrying **this** format —
+plenty of RTK radios carry a different, proprietary one, and the bug is not
+reachable through those. And only a multirotor was tested, only holding
+position and flying a short leg. Tractors, boats, fixed-wing aircraft and
+survey workflows are untested, as is any behaviour when the error is ramped in
+slowly rather than applied at once.
