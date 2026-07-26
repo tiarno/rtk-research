@@ -13,7 +13,17 @@ now **refuted by measurement and corrected in every document**: that
 fortification is the distro default (Debian's own `rtklib`, on ARM, imports no
 `*_chk` at all) and that the length byte is a fine-grained dial (four rungs,
 each 256× the last). The defect is confirmed present in Emlid's `reach` fork,
-so this is a product bug and not only a library bug. Nothing is blocked.
+so this is a product bug and not only a library bug. The vertical third of the
+error is measured and is a **negative** — the baro outvotes it — which bounds
+the attack and names the defence. The talk now has an outline
+([talk-outline.md](talk-outline.md)), and the provenance claims are re-runnable
+rather than asserted (`check_fork.sh`, `check_binary.sh`, `check_image.sh`).
+Nothing is blocked.
+
+**The research is no longer the bottleneck; the demo staging is.** Everything
+claimed is measured, every document agrees, and the demo runs on a length that
+generalises. What is missing is the visual build — map, two icons, a persistent
+FIXED indicator — and a rehearsal.
 
 The one thing to carry forward: **run `./loop_demo.sh 0` before quoting any
 closed-loop number.** Three harness defects have produced attack-shaped results
@@ -151,6 +161,13 @@ reliability matters as much as the numbers.
 Effort figures are rough and assume the environment is already set up (see Key
 Parameters).
 
+> **These are the *research* items.** Talk-preparation tasks — demo visuals,
+> the recorded fallback, rehearsing a failed start, hardware to order — live in
+> [talk-outline.md](talk-outline.md#pre-submission-checklist) so the two lists
+> cannot drift apart. If you are picking up work and the goal is the talk, read
+> that checklist first: on current state it is the binding constraint, not
+> anything below.
+
 **1. ARM offsets — mostly overtaken, ~30 min if wanted.** Debian's shipped
 armhf binaries are now in hand (`/tmp/deb`), so ARM builds no longer need qemu
 to exist — but the `sta_t` offsets on ARM are still unconfirmed, and that is
@@ -215,9 +232,27 @@ TDL450, Satel 4Pro) are a different animal: GMSK/4FSK, 403–473 MHz, transparen
 serial. Full plan, both paths, and the hardware list in
 [talk-outline.md](talk-outline.md#8-delivering-it-over-the-air).
 
-## Files changed this session
+## Commits, most recent session first
 
-Committed in `e973bdd` (the sign resolution):
+**2026-07-26, later session.** Eight commits, `3cd70d4..b55a92f`:
+
+| commit | what |
+|---|---|
+| `3cd70d4` | measured the rungs 209–214 — the dial has four, `n1=211` is the one that generalises; resynced the ELI5, which still carried withdrawn numbers and a workaround that no longer existed |
+| `4f27f64` | Emlid `reach` fork confirmed to carry the defect, the layout and the unguarded adoption — a product bug, not only a library bug |
+| `81c0c73` | **refuted** the prediction that Linux targets abort: Debian ships RTKLIB 2.4.3 b34 for 12 architectures and the armhf build is unfortified |
+| `5f82c3e` | moved the demo to `n1=211` at a base sited to make it visible; control 0.03 m, attacked 1.39 m |
+| `5ad69c4` | doc consistency pass — two claims this session falsified were corrected in every document, not just where they originated |
+| `181f6e7` | measured the vertical: a 1.12 m height lie moved the aircraft 0.04 m, because the baro outvotes it. The axis with a redundant sensor resisted |
+| `1d5645f` | the talk outline, the conducted-RF delivery plan, and the hardware list |
+| `b55a92f` | surfaced the provenance tooling — `check_fork.sh`, `check_binary.sh`, `check_image.sh`, `pick_base.py` — so the Emlid/Debian/Navio claims are re-runnable rather than asserted |
+
+**2026-07-26, earlier session.** *(These two were originally recorded here as
+`e973bdd` and `5b9a0f5`, which are not in the repo — the branch was rebased
+after the note was written. The real hashes are below; the file lists are
+unchanged.)*
+
+Committed in `fb8a3f7` (the sign resolution):
 
 | file | change |
 |---|---|
@@ -228,7 +263,7 @@ Committed in `e973bdd` (the sign resolution):
 | `research/sign_check.py` | new — truth, GPS and EKF position in one frame |
 | `research/README.md`, `docs/HANDOFF.md` | corrected numbers, third harness defect written up |
 
-Committed in `5b9a0f5` (the stock-parameter demo):
+Committed in `034d8a7` (the stock-parameter demo):
 
 | file | change |
 |---|---|
@@ -272,9 +307,22 @@ Two environment traps worth remembering:
 - The harness derives its own GPS velocity by differencing, standing in for
   Doppler. Estimator parameters are stock now, but the *receiver* is doing
   something a real one would not have to.
-- No embedded receiver firmware examined (item 5); ARM untested (item 1).
+- **No receiver firmware binary examined.** Emlid Reach's *source* is confirmed
+  affected (`./check_fork.sh emlid/RTKLIB reach`), but the shipped firmware was
+  not obtainable. Say "the source is affected", not "the product behaves this
+  way".
+- **ARM: measured for fortification, unconfirmed for offsets.** Debian's armhf
+  binaries are unfortified, so ARM builds ship in the silent column. But
+  `offsetof(sta_t,pos)` on ARM has not been checked, and that is what a payload
+  length for an ARM target depends on. `check_fork.sh` computes it from a
+  header; it has only been run against x86-64 assumptions.
 - Windows measurement covers the decode and coordinate corruption, not the
-  real-time adoption via `update_antpos()` — the GUI apps were not driven.
+  real-time adoption — the GUI apps were not driven.
+- The vertical result is specific to a multirotor with a barometer. A vehicle
+  that fuses GPS height should be expected to move in all three axes; untested.
+- The demo base is *sited* so the `n1=211` rung is visible (1.80 m of a 2 m
+  quantum). At an arbitrary base the error is a uniform draw in [0, 2) m. The
+  bound is the claim, not the 1.8.
 
 ---
 
