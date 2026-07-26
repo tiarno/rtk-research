@@ -29,10 +29,76 @@ silently, rc=0, with the magnitude dial reproducing to the last digit and 32-bit
 and 64-bit identical. `_FORTIFY_SOURCE` is glibc-only; these are Embarcadero
 builds where the abort has no equivalent to enable.
 
-Open items now: the displacement *direction* does not line up between the
-closed and open loop runs (magnitudes do — quote those, not the sign); the
-`EK3_SRC1_VELXY` workaround is a deviation from stock config forced by the
-harness; no embedded receiver firmware examined; ARM untested.
+## Where this is going
+
+The work is destined for a conference talk **with a live demo**, decided
+2026-07-26. No deadline. That changes the priorities below: a live demo has to
+survive someone asking "why is that setting changed?", so harness deviations
+from a stock configuration are load-bearing rather than footnotes, and startup
+reliability matters as much as the numbers.
+
+## Next steps, in the order I would take them
+
+Effort figures are rough and assume the environment is already set up (see Key
+Parameters).
+
+**1. Resolve the displacement sign — ~30 min, no new runs.** The closed-loop
+displacement carries the same sign as the reported GPS error, while
+`sitl_demo.sh` measured the aircraft moving *opposite* the injected offset. The
+logs for both are on disk; this is reading `parse_sitl_log.py`'s sign
+convention and plotting truth against GPS north/east across the attack window.
+Do it first: "it repositioned to correct a drift that never happened" is the
+strongest line available and it currently rests on one run while the other
+appears to contradict it.
+
+**2. Emit our own NMEA RMC — ~half a day. The one that matters for the demo.**
+RTKLIB's rtksvr path populates no solution velocity (measured: zero with
+`prcopt.dynamics` on and off, against a rover fed a known 1 m/s ramp), so its
+RMC always reports 0.00 knots and the demo needs `EK3_SRC1_VELXY 0` to stay
+stable. Rather than chase RTKLIB's filter, stop using its NMEA writer and
+format RMC in `e2e_harness.c`, deriving speed and course by differencing
+successive solutions at 5 Hz. Then the demo runs on stock parameters. Say
+plainly that differencing stands in for the Doppler velocity a real receiver
+reports.
+
+**3. ARM offsets — ~1 hour, near-certain outcome.** Cross-compile the offset
+probe for aarch64 and run it under qemu-user. The 32-vs-64-bit result already
+showed why it should be identical: everything ahead of `pos` in `sta_t` is
+`char` arrays and `int`s. Cheaply converts a stated unknown into "one payload
+length works on every target checked".
+
+**4. `decode_type1007` / `1008` — ~1 hour.** Same harness, different message
+type. Expect a negative result worth stating precisely: those fields stop short
+of `pos`, so memory-safety only, no positioning impact. It answers "why 1033?"
+
+**5. A patch PR to RTKLIB — nearly free.** The fix is a three-line clamp. It
+will probably sit unmerged, which is the point: "here is the four-line fix,
+filed, still unmerged" closes better than "still unpatched".
+
+**6. Real hardware — a few hundred dollars, a weekend, biggest credibility
+gain.** Note the F9P cannot be the target: it does not run RTKLIB. The setup is
+an F9P feeding real observations to **RTKNAVI on Windows** — now measured as
+unfortified — with the 1033 injected into an NTRIP correction stream. Upgrades
+the result from simulated to real satellites, real receiver, shipped software.
+
+**7. Embedded firmware (Emlid Reach) — uncertain, 90 min to find out.** Check
+first whether a ReachView image is downloadable without owning the device. If
+it is, binwalk plus `objdump` for `*_chk` imports. Either answer is a good
+slide, since the prediction is that Linux-based hardware lands in the *abort*
+column, opposite the desktop apps.
+
+**Deliberately not doing: RF delivery.** Technically easy with the Heltec gear,
+but 433/915 MHz is where real survey and agricultural rigs operate. "No RF was
+transmitted into open air" is a genuine virtue of this work. If it is ever
+wanted, do it conducted — attenuator or shielded enclosure — never radiated.
+
+## Standing caveats
+
+- The displacement *direction* is unresolved (item 1). Quote magnitudes.
+- `EK3_SRC1_VELXY 0` is a harness workaround, not an attack property (item 2).
+- No embedded receiver firmware examined (item 7); ARM untested (item 3).
+- Windows measurement covers the decode and coordinate corruption, not the
+  real-time adoption via `update_antpos()` — the GUI apps were not driven.
 
 ---
 
@@ -89,9 +155,7 @@ attack   35.132075630  139.624284796  74.3630   base -3978240.0000
 691 injections, base position adopted from the stream, no file editing
 anywhere. The aircraft armed, flew all three phases and landed.
 
-**Nothing is committed.** Working tree has modifications to `gnss_sim.c`,
-`mav_pos.py`, `ardupilot_demo.py`; `inject_relay.py` and `loop_demo.sh` are
-untracked; the two junk binaries are staged for deletion.
+*(All of this is committed now — `ea6f5f2` onward, merged to `master`.)*
 
 ## What's Blocked
 
@@ -111,21 +175,18 @@ a delayed-feedback instability: the loop latency (mav_pos -> FIFO -> epoch ->
 RTCM -> relay -> RTKLIB solve -> NMEA -> SITL) is far longer than the ~200 ms
 GPS delay ArduPilot's EKF assumes.
 
+> **That last sentence was wrong — REFUTED 2026-07-26.** The loop delay
+> measures 130 ms, faster than a real GPS. The actual cause was RTKLIB's NMEA
+> reporting zero velocity to an EKF that fuses it. The observation of the
+> oscillation was sound; the explanation was not.
+
 **Do not quote the 39 m drift or the 157 m waypoint miss from this run.** They
 are the instability, not attack effects, and nothing from the closed loop
 should go into `research/README.md` until the vehicle is stable.
 
-## Next Steps
-
-1. Measure the end-to-end loop latency, then set `GPS_DELAY_MS` / the EK3 GPS
-   delay to match, or shorten the pipeline (the FIFO and per-stage settles are
-   the obvious candidates).
-2. Re-run and confirm the aircraft holds position with the bias present, which
-   is the stable behaviour the open-loop demo already measured (~1.9 m).
-3. Only then measure the waypoint miss, and add the closed-loop result to
-   `research/README.md` — replacing the "what still prevents a single
-   packet-to-propeller chain" caveat.
-4. Commit. Nothing from this session is committed yet.
+*(Superseded — all four are done. The current plan is "Next steps, in the order
+I would take them" near the top. Item 1 there is what came out of item 1 here
+going the way it did.)*
 
 ## Key Parameters/Settings
 
@@ -135,6 +196,8 @@ should go into `research/README.md` until the vehicle is stable.
 | RTKLIB | `~/RTKLIB` in WSL, branch `rtklib_2.4.3`, commit `180043e` |
 | ArduPilot SITL | `~/apsitl/arducopter` (prebuilt ArduCopter 4.7.0) |
 | run command | `RTKLIB=/home/tim/RTKLIB BIN=/home/tim/apsitl/arducopter bash ./loop_demo.sh 212` from `/mnt/c/Users/tim/work/rtk/research` in WSL Ubuntu |
+| control run | the same with `0` instead of `212` — injection disabled. Run it *first*; it should land within centimetres |
+| latency probe | `RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 90` — no vehicle, prints the loop delay |
 | `LEN` | 212 — declared `rectype` length, selects a 2.4 m base error |
 | `DELAY` | 50 s of clean flight before injection starts |
 | `RUN` | 260 s — must outlast the whole flight profile or SITL loses its GPS mid-flight |

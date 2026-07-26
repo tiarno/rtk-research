@@ -142,11 +142,22 @@ that means anything on a project nobody is maintaining.
 A security firm (FuzzingLabs) found and reported the overflow in June 2026.
 That part is theirs, and they described it accurately.
 
-What they did not chase is **where the spillover lands**. Their own test used a
-field that stops short of the coordinates. This work found the fields that
-reach them, that erasing acts as a tunable dial, that the receiver swallows the
-result while still claiming a perfect fix, which real builds are vulnerable in
-which way — and what an aircraft then does about it.
+What they did not chase is **where the spillover lands**. Their report treats
+this as a memory-corruption bug and never mentions the base station's
+coordinates; their own test drives a field that stops short of them. Added
+here:
+
+- **The fields that reach the coordinates.** Only three of the five can, and the
+  one their proof-of-concept uses is not among them.
+- **The length byte is a dial**, from a five-millimetre nudge to total
+  destruction, and the interesting setting is the small one.
+- **The receiver never notices.** It reports its highest quality flag, at every
+  single moment, identically to a clean run.
+- **Which real builds are affected, by running them.** The programs people
+  download corrupt the coordinate silently. The loud crash only happens on a
+  build almost nobody uses.
+- **What a vehicle does about it** — measured two independent ways, including
+  one where the drone computes the false position for itself from the message.
 
 ## What is not proven
 
