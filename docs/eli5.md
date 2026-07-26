@@ -103,18 +103,26 @@ between the landing pad and what's beside it.
 
 ## Which software is affected
 
-This depends on a detail nobody thinks about: whether the program was built
-with a particular safety check switched on.
+This depends on a detail nobody thinks about: whether anything is watching the
+copy that overflows.
 
-- **Safety check on** — the program detects the overflow and **dies**. One
-  message kills the receiver. Bad, but loud and obvious.
-- **Safety check off** — the position is corrupted **silently**. This is the
+- **Something watching** — the overflow is detected and the program **dies**.
+  One message kills the receiver. Bad, but loud and obvious.
+- **Nothing watching** — the position is corrupted **silently**. This is the
   dangerous one.
 
-We checked the actual programs people download and run. The official Windows
-RTKLIB tools — including RTKNAVI, the main real-time application — are built
-**without** the check. So is the popular "Demo5" fork used by most hobbyists.
-Both contain the vulnerable code.
+We downloaded the actual programs people run — the official Windows tools, and
+the popular "Demo5" build most hobbyists use — and fed them the malicious
+message. Both accepted it without complaint and wrote a base station position
+2.4 metres from the truth into their own output. Nothing crashed. Every length
+we tried behaved exactly as it did in our own tests, down to the last digit.
+
+And here is the part worth understanding: **this is not a safety check somebody
+forgot to switch on.** The thing that catches the overflow is a feature of the
+system libraries used on Linux. The Windows builds are made with a different
+compiler and different libraries, where that feature does not exist to switch
+on. So for the software almost everyone actually runs, the loud version is not
+an option that was declined — it was never on the menu.
 
 **The silent version is the normal case, not the exotic one.** You only get the
 loud crash if you compile it yourself on Linux.

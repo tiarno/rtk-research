@@ -150,6 +150,64 @@ coordinates, since it is the float mantissa being truncated. An attacker who
 does not know them can sweep `n1` upward from 209 until the effect is the size
 they want.
 
+### The same dial on the binaries people actually run
+
+Everything above is a local gcc build, which leaves the question of which
+column — abort or silent corruption — the *shipped* binaries fall into. Both
+of the distributions in common use fall into the silent one, measured rather
+than inferred.
+
+Tested on Windows 11: `convbin.exe` from
+[tomojitakasu/RTKLIB_bin](https://github.com/tomojitakasu/RTKLIB_bin)
+`master`, the official Windows distribution, and from
+[rtklibexplorer](https://github.com/rtklibexplorer/RTKLIB/releases) release
+`RTKLIB_EX_2.5.1` — the "demo5" fork most low-cost-receiver users run.
+Downloaded 2026-07-26; SHA-256 prefixes `2207b9460862fc1a` and
+`245647b373cdc95f`. `convbin` decodes RTCM3 through the same
+`input_rtcm3` → `decode_type1033` path and writes the decoded station
+coordinate into its RINEX header, so the corruption is readable straight out
+of the output file. Streams are the ones `inject_1033.py` produces.
+
+| declared `n1` | official (32-bit) `pos[0]` | demo5 2.5.1 (64-bit) `pos[0]` | rc |
+|---|---|---|---|
+| 205 | -3978242.4348 | -3978242.4348 | 0 |
+| 208 | -3978242.4348 | -3978242.4348 | 0 |
+| 210 | -3978242.4297 | -3978242.4297 | 0 |
+| 212 | **-3978240.0000** | **-3978240.0000** | 0 |
+| 215 | 0.0000 | 0.0000 | 0 |
+| 223 | 0.0000 (and `pos[1]`) | 0.0000 (and `pos[1]`) | 0 |
+| 255 | all three zeroed | all three zeroed | 0 |
+
+Truth is -3978242.4348. Three things follow.
+
+**Nothing crashes — and not because a check was left switched off.**
+`_FORTIFY_SOURCE` is a glibc feature. Both binaries are Embarcadero C++
+Builder executables against the Windows CRT, and neither imports any `*_chk`
+function, so the fortified `strncpy` that aborts a Linux build has no
+equivalent here to switch on. The abort column is the Linux-build column; on
+Windows there is only the silent one. Every run above exits 0.
+
+**The magnitude dial reproduces to the last digit** on real distributions,
+including the 5 mm perturbation at `n1=210` and the 2.4 m one at 212.
+
+**32-bit and 64-bit behave identically**, which refines a caveat listed under
+Limitations. Everything in `sta_t` ahead of `pos` is `char` arrays and `int`s
+(448 + 12 = 460, padded to 464 for 8-byte alignment), so `pos` sits at the
+same offset in both ABIs and a single payload length works across both. That
+equivalence is measured on these two builds; it is not a general claim about
+every target, and ARM in particular is untested.
+
+Both distributions also ship the real-time applications `rtknavi.exe` and
+`strsvr.exe`, and those binaries contain the same decoder — the trace strings
+`rtcm3 1033 length error: len=%d` and `rtcm3 1033: ant=%s:%s rec=%s:%s:%s` are
+present in each. They are GUI programs and were not driven here. So what is
+measured on Windows is the decode and the coordinate corruption; the
+subsequent adoption into the baseline by `update_antpos()` is measured on the
+Linux build only.
+
+Demo5 shipped 2.5.1 on 2026-06-22, **13 days after** the FuzzingLabs issues
+were filed, with the bug unchanged.
+
 ### Effect on the solution
 
 Feeding those magnitudes to RTKLIB's own positioning engine (`rnx2rtkp`,
@@ -579,17 +637,20 @@ Read these before quoting anything above.
   encoding and produce identical flag sequences, so the comparison holds. The
   synthetic streams from `gnss_sim` do not have this problem and hold Q=1
   (fixed) in both runs.
-- Offsets are x86-64 / gcc. ARM and 32-bit builds shift the field offsets and
-  therefore the length thresholds. The conclusions hold qualitatively but must
-  be recomputed per target.
+- Offsets are x86-64 / gcc. The shipped 32-bit Windows build turns out to give
+  identical thresholds and magnitudes (see "The same dial on the binaries
+  people actually run"), because everything in `sta_t` ahead of `pos` is
+  `char` arrays and `int`s. ARM remains untested, and the thresholds must
+  still be recomputed for any target whose alignment differs.
 - The magnitude for a given `n1` is dataset-specific — it depends on the base
   station's coordinate values, since mantissa bytes are being truncated.
 - Only one rover/base pair (2005, GPS-only) was tested. Whether the Q=1
   behaviour holds across constellations, baseline lengths, and modern
   multi-frequency data is untested.
 - The fortified/unfortified split was measured on glibc + gcc 7.5 on x86-64.
-  The shipped Windows binaries were then checked directly and are unfortified
-  (see above), but **no embedded receiver firmware has been examined**. Emlid
+  The shipped Windows binaries were then run directly and corrupt the
+  coordinate silently — see "The same dial on the binaries people actually
+  run" — but **no embedded receiver firmware has been examined**. Emlid
   Reach, ArduSimple and similar are Linux-based and would plausibly land in
   the *fortified* column — the opposite of the desktop applications. That is
   unverified and worth doing before claiming anything about hardware products.
