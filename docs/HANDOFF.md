@@ -1,27 +1,52 @@
 # Handoff Notes
 
-**Session date:** 2026-07-26 (previous session 2026-07-25)
+**Session date:** 2026-07-26 (second session that day)
 
 ## Since the last handoff
 
-Two things closed out. Both are written up in
-[research/README.md](../research/README.md); this is the summary.
+**The displacement sign is resolved, and it cost a number.** The two runs
+never disagreed about physics. The closed-loop harness armed its injection on
+a timer counted from RTKLIB's connect, which put it behind every startup delay
+in the chain, and it lost the race: the GPS started lying at t=44.2 s while the
+aircraft did not leave the ground until t=47.4 s. Phase 1 was never clean, and
+the GUIDED hold target — read from the vehicle's own reported position once
+airborne — was captured from a position the GPS was already falsifying. The
+2.16 m "displacement while holding" was a takeoff transient anchored to that
+lie. **It is withdrawn.**
 
-**The closed loop works and the numbers are trustworthy.** The blocker below
-turned out not to be latency — that measured 130 ms, faster than a real GPS.
-The real cause was RTKLIB's NMEA reporting 0.00 knots regardless of motion,
-which ArduPilot's EKF3 fuses by default; `EK3_SRC1_VELXY 0` fixes it.
-`prcopt.dynamics` does *not*, measured against a known 1 m/s ramp.
+Fixed by inverting the control: `ardupilot_demo.py --trigger-file` creates a
+file once airborne and holding, and `inject_relay.py --trigger` waits for it.
+No clock is involved, and the sequencing cannot race. Re-measured:
 
-|  | control, 0 injected | attacked, 691 injected |
+|  | control, 0 injected | attacked, 520 injected |
 |---|---|---|
-| GPS vs. truth after | 0.00 m | 2.08 m |
-| displacement holding | — | 2.16 m |
+| GPS vs. truth after | 0.00 m | 1.91 m |
+| displacement holding | — | 1.89 m, **opposite** the offset |
 | waypoint miss | 0.09 m | 1.81 m |
 
-Agrees with the open-loop figures (1.90 m, 1.87 m) measured a different way.
-**Always run `./loop_demo.sh 0` first** — two harness defects produced
-attack-shaped displacements of 26 m and 113 m with no attack present.
+Now agrees with the open-loop run component by component to within 7 cm — N,E
+of the injected offset, the displacement and the miss — not just in magnitude.
+So **"it repositioned to correct a drift that never happened" is now supported
+by both runs**, which is the line the last handoff wanted and could not have.
+
+`parse_sitl_log.py` gained two guards so this cannot recur silently: attack
+onset now requires a *sustained* offset (a clean control run's 30 m transit
+spikes 3 m of GPS lag and was being read as an attack), and it refuses to
+report a displacement at all if the attack predates takeoff, naming the reason.
+`sign_check.py` is new — truth, GPS and EKF in one frame, which is what made
+the diagnosis obvious.
+
+**Always run `./loop_demo.sh 0` first** — three harness defects have now
+produced attack-shaped displacements with no attack present.
+
+**Earlier that day:** the closed loop's instability was RTKLIB's NMEA reporting
+0.00 knots regardless of motion, which ArduPilot's EKF3 fuses by default;
+`EK3_SRC1_VELXY 0` fixes it and `prcopt.dynamics` does not, measured against a
+known 1 m/s ramp. Loop latency measured 130 ms and was exonerated. The shipped
+Windows binaries (`convbin.exe`, official and demo5 2.5.1) corrupt the station
+coordinate silently, rc=0, magnitude dial reproducing to the last digit, 32-
+and 64-bit identical; `_FORTIFY_SOURCE` is glibc-only and these are Embarcadero
+builds where the abort has no equivalent to enable.
 
 **The shipped Windows binaries are measured, not asserted.** `convbin.exe` from
 both the official distribution and demo5 2.5.1 corrupt the station coordinate
@@ -42,16 +67,7 @@ reliability matters as much as the numbers.
 Effort figures are rough and assume the environment is already set up (see Key
 Parameters).
 
-**1. Resolve the displacement sign — ~30 min, no new runs.** The closed-loop
-displacement carries the same sign as the reported GPS error, while
-`sitl_demo.sh` measured the aircraft moving *opposite* the injected offset. The
-logs for both are on disk; this is reading `parse_sitl_log.py`'s sign
-convention and plotting truth against GPS north/east across the attack window.
-Do it first: "it repositioned to correct a drift that never happened" is the
-strongest line available and it currently rests on one run while the other
-appears to contradict it.
-
-**2. Emit our own NMEA RMC — ~half a day. The one that matters for the demo.**
+**1. Emit our own NMEA RMC — ~half a day. The one that matters for the demo.**
 RTKLIB's rtksvr path populates no solution velocity (measured: zero with
 `prcopt.dynamics` on and off, against a rover fed a known 1 m/s ramp), so its
 RMC always reports 0.00 knots and the demo needs `EK3_SRC1_VELXY 0` to stay
@@ -61,27 +77,27 @@ successive solutions at 5 Hz. Then the demo runs on stock parameters. Say
 plainly that differencing stands in for the Doppler velocity a real receiver
 reports.
 
-**3. ARM offsets — ~1 hour, near-certain outcome.** Cross-compile the offset
+**2. ARM offsets — ~1 hour, near-certain outcome.** Cross-compile the offset
 probe for aarch64 and run it under qemu-user. The 32-vs-64-bit result already
 showed why it should be identical: everything ahead of `pos` in `sta_t` is
 `char` arrays and `int`s. Cheaply converts a stated unknown into "one payload
 length works on every target checked".
 
-**4. `decode_type1007` / `1008` — ~1 hour.** Same harness, different message
+**3. `decode_type1007` / `1008` — ~1 hour.** Same harness, different message
 type. Expect a negative result worth stating precisely: those fields stop short
 of `pos`, so memory-safety only, no positioning impact. It answers "why 1033?"
 
-**5. A patch PR to RTKLIB — nearly free.** The fix is a three-line clamp. It
+**4. A patch PR to RTKLIB — nearly free.** The fix is a three-line clamp. It
 will probably sit unmerged, which is the point: "here is the four-line fix,
 filed, still unmerged" closes better than "still unpatched".
 
-**6. Real hardware — a few hundred dollars, a weekend, biggest credibility
+**5. Real hardware — a few hundred dollars, a weekend, biggest credibility
 gain.** Note the F9P cannot be the target: it does not run RTKLIB. The setup is
 an F9P feeding real observations to **RTKNAVI on Windows** — now measured as
 unfortified — with the 1033 injected into an NTRIP correction stream. Upgrades
 the result from simulated to real satellites, real receiver, shipped software.
 
-**7. Embedded firmware (Emlid Reach) — uncertain, 90 min to find out.** Check
+**6. Embedded firmware (Emlid Reach) — uncertain, 90 min to find out.** Check
 first whether a ReachView image is downloadable without owning the device. If
 it is, binwalk plus `objdump` for `*_chk` imports. Either answer is a good
 slide, since the prediction is that Linux-based hardware lands in the *abort*
@@ -94,9 +110,8 @@ wanted, do it conducted — attenuator or shielded enclosure — never radiated.
 
 ## Standing caveats
 
-- The displacement *direction* is unresolved (item 1). Quote magnitudes.
-- `EK3_SRC1_VELXY 0` is a harness workaround, not an attack property (item 2).
-- No embedded receiver firmware examined (item 7); ARM untested (item 3).
+- `EK3_SRC1_VELXY 0` is a harness workaround, not an attack property (item 1).
+- No embedded receiver firmware examined (item 6); ARM untested (item 2).
 - Windows measurement covers the decode and coordinate corruption, not the
   real-time adoption via `update_antpos()` — the GUI apps were not driven.
 
@@ -199,7 +214,7 @@ going the way it did.)*
 | control run | the same with `0` instead of `212` — injection disabled. Run it *first*; it should land within centimetres |
 | latency probe | `RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 90` — no vehicle, prints the loop delay |
 | `LEN` | 212 — declared `rectype` length, selects a 2.4 m base error |
-| `DELAY` | 50 s of clean flight before injection starts |
+| attack trigger | `$T/attack.go`, created by the flight driver at phase 2. Replaced the `DELAY` timer, which raced the takeoff |
 | `RUN` | 260 s — must outlast the whole flight profile or SITL loses its GPS mid-flight |
 | ports | 5901 base, 5902 rover, 5911 relay, 5903 NMEA, 5760 SITL SERIAL0, 5762 SERIAL1 |
 | base ECEF | `-3978242.4348,3382841.1715,3649902.7667` |

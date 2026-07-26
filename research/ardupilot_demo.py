@@ -32,6 +32,7 @@ The offset flown is the one actually measured, not an invented number:
 """
 import argparse
 import math
+import os
 import time
 
 from pymavlink import mavutil
@@ -168,7 +169,18 @@ def main():
                          "loop, where the offset arrives as a malicious 1033 "
                          "in the correction stream and applying a glitch here "
                          "as well would double-count it.")
+    ap.add_argument("--trigger-file", metavar="PATH",
+                    help="create this file at the start of phase 2, to release "
+                         "an inject_relay.py --trigger waiting on it. The "
+                         "aircraft decides when the clean phase ends, so "
+                         "injection cannot begin before it is holding.")
     args = ap.parse_args()
+
+    if args.trigger_file:
+        try:
+            os.unlink(args.trigger_file)
+        except FileNotFoundError:
+            pass
 
     v = Vehicle(args.conn)
     v.set_param("ARMING_CHECK", 0)
@@ -201,6 +213,14 @@ def main():
     if args.no_glitch:
         print(f"\nphase 2: holding {args.attack:.0f}s -- no glitch applied "
               f"here; the offset arrives in the correction stream")
+        if args.trigger_file:
+            # Only now is the aircraft airborne, holding, and anchored to a
+            # hold target captured from a clean position. Releasing the relay
+            # any earlier measures a takeoff into a lying GPS instead of a
+            # response to one.
+            with open(args.trigger_file, "w") as f:
+                f.write(f"{time.time():.3f}\n")
+            print(f"  released the relay: {args.trigger_file}")
     else:
         dn, de = metres(D_LAT, D_LON, HOME_LAT)
         print(f"\nphase 2: ATTACK -- GPS glitch N={dn:+.2f} m E={de:+.2f} m "

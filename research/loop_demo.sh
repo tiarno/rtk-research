@@ -26,7 +26,6 @@
 RTKLIB="${RTKLIB:?set RTKLIB to your RTKLIB checkout}"
 BIN="${BIN:-$HOME/apsitl/arducopter}"
 LEN="${1:-212}"
-DELAY="${DELAY:-50}"        # seconds of clean flight before injecting
 # Must outlast the whole profile: ~40 s of staged startup, then EKF settle,
 # arm and takeoff, then hold + attack + goto + land. If the streams stop
 # first, SITL loses its GPS mid-flight and the run ends in a connection reset
@@ -34,7 +33,9 @@ DELAY="${DELAY:-50}"        # seconds of clean flight before injecting
 RUN="${RUN:-260}"           # total seconds
 HERE="$(cd "$(dirname "$0")" && pwd)"
 T="${T:-/tmp/rtk-loop}"
+TRIG="$T/attack.go"         # flight driver -> relay: "phase 1 is over"
 mkdir -p "$T"
+rm -f "$TRIG"
 export LIBC_FATAL_STDERR_=1
 
 BASE_ECEF=-3978242.4348,3382841.1715,3649902.7667
@@ -100,9 +101,15 @@ echo "### 1. observable synthesiser (binds :5901 base, :5902 rover) ###"
 # and a client that gives up takes the rest of the chain down with it.
 sleep 8
 
-echo "### 2. on-path relay :5911 -> :5901 (clean ${DELAY}s, then injects) ###"
+echo "### 2. on-path relay :5911 -> :5901 (injects when the aircraft says so) ###"
+# Not a timer. Counting seconds from the consumer's connect couples the attack
+# to every startup delay ahead of it, and it raced: in the 2026-07-26 run the
+# relay armed 3.2 s BEFORE the aircraft left the ground, so phase 1 was never
+# clean and the GUIDED hold target was captured from an already-corrupted
+# position. The flight driver now creates $TRIG when it is airborne and
+# holding, and the relay waits for it.
 python3 "$HERE/inject_relay.py" --listen 5911 --upstream 127.0.0.1:5901 \
-    --len "$LEN" --delay "$DELAY" > "$T/relay.log" 2>&1 &
+    --len "$LEN" --trigger "$TRIG" > "$T/relay.log" 2>&1 &
 sleep 4
 
 # RTKLIB emits RMC with a speed of 0.00 no matter how fast the rover is moving
@@ -138,6 +145,7 @@ echo "### flying ###"
 # --no-glitch: the offset must reach the aircraft only through the corrupted
 # base coordinate, so the flight driver injects nothing of its own.
 python3 "$HERE/ardupilot_demo.py" --conn tcp:127.0.0.1:5760 --no-glitch \
+        --trigger-file "$TRIG" \
         --hold 25 --attack 40 --goto-time 55 2>&1 | tee "$T/flight.log" | tail -20
 
 sleep 3

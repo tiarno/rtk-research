@@ -42,6 +42,7 @@ def main():
     mlog = mavutil.mavlink_connection(args.logfile)
 
     sim, gps = [], []
+    alt = []
     while True:
         m = mlog.recv_match(type=["SIM", "GPS"])
         if m is None:
@@ -51,6 +52,9 @@ def main():
             continue
         if m.get_type() == "SIM":
             sim.append((t / 1e6, m.Lat, m.Lng))
+            a = getattr(m, "Alt", None)
+            if a is not None:
+                alt.append((t / 1e6, a))
         elif getattr(m, "I", 0) == 0 and getattr(m, "Status", 0) >= 3:
             gps.append((t / 1e6, m.Lat, m.Lng))
 
@@ -70,17 +74,72 @@ def main():
         dn, de = ne(gla - sla, glo - slo, sla)
         offs.append((gt, math.hypot(dn, de), dn, de))
 
-    # The glitch is a step; find where the GPS-vs-truth offset jumps.
-    mags = [o[1] for o in offs]
-    lo, hi = min(mags), max(mags)
-    if hi - lo < 0.5:
-        print(f"\nno GPS/truth divergence found (offset {lo:.2f}..{hi:.2f} m)")
-        print("the glitch was probably never applied")
-        return 1
-    thresh = (lo + hi) / 2.0
-    t_attack = next(o[0] for o in offs if o[1] > thresh)
-    print(f"\nGPS-vs-truth offset: {lo:.2f} m before, {hi:.2f} m after")
-    print(f"attack begins at t={t_attack:.1f}s")
+    # Find where the GPS-vs-truth offset steps -- and stays stepped.
+    #
+    # An instantaneous threshold crossing is not enough: while the aircraft
+    # flies a leg, its GPS lags its true position by a metre or two, so a
+    # perfectly clean control run shows a 3 m transient spike during the goto
+    # and gets read as an attack. The injected offset is *sustained*, so
+    # require the median offset over the whole measurement window to be
+    # elevated, which a few seconds of transit lag cannot fake.
+    def fwd_median(i, span):
+        w = [o[1] for o in offs[i:] if o[0] <= offs[i][0] + span]
+        return sorted(w)[len(w) // 2] if w else 0.0
+
+    span = args.hold_window
+    med = [fwd_median(i, span) for i in range(len(offs))]
+    # `lo` from the instantaneous offsets, `hi` from the sustained ones: a
+    # transit spike must not set the scale. The onset is then the first
+    # instantaneous crossing that is also sustained -- taking the first
+    # crossing of the *median* instead would place it half a window early,
+    # because a window straddling the step is already half elevated.
+    lo, hi = min(o[1] for o in offs), max(med)
+    t_attack = None
+    if hi - lo >= 0.5:
+        thresh = (lo + hi) / 2.0
+        t_attack = next((o[0] for o, mv in zip(offs, med)
+                         if o[1] > thresh and mv > thresh), None)
+
+    if t_attack is None:
+        if lo > 0.5:
+            # No step anywhere, but the rover never agreed with truth either.
+            print(f"\n*** GPS is offset from truth by {lo:.2f}..{hi:.2f} m for "
+                  "the ENTIRE log.")
+            print("*** The attack predates the log, so there is no clean")
+            print("*** baseline in it and no displacement can be attributed.")
+            print("*** Re-run with the relay released by the flight driver.")
+        else:
+            print(f"\nno sustained GPS/truth divergence (offset {lo:.2f} m, "
+                  f"sustained max {hi:.2f} m)")
+            print("nothing was injected, or the injection never reached the "
+                  "rover")
+    else:
+        print(f"\nGPS-vs-truth offset: {lo:.2f} m before, {hi:.2f} m after")
+        print(f"attack begins at t={t_attack:.1f}s")
+
+    # The attack must land on an aircraft that is already flying and already
+    # holding a target captured from a clean position. If it arrives during
+    # takeoff, the hold target is captured from an offset the GPS is already
+    # reporting, and the displacement measured below is a takeoff transient
+    # anchored to a lie rather than a response to one. That happened, and it
+    # is what made the closed-loop displacement disagree in sign with the
+    # open-loop run -- see research/README.md.
+    airborne = None
+    if alt:
+        ground = alt[0][1]
+        airborne = next((t for t, a in alt if a - ground > 0.5), None)
+    if t_attack is not None and airborne is not None:
+        if t_attack < airborne:
+            print(f"\n*** the GPS started lying at t={t_attack:.1f}s but the "
+                  f"aircraft did not leave the ground until t={airborne:.1f}s.")
+            print("*** There was no clean flight phase. The hold target was")
+            print("*** captured from an already-corrupted position, so the")
+            print("*** displacement below is NOT a response to the attack.")
+            print("*** Do not quote it. Re-run: the relay must be released by")
+            print("*** the flight driver (--trigger), not by a timer.")
+        else:
+            print(f"(airborne at t={airborne:.1f}s, "
+                  f"{t_attack - airborne:.0f}s before the attack)")
 
     def truth_window(t0, t1):
         pts = [(la, lo_) for t, la, lo_ in sim if t0 <= t <= t1]
@@ -89,41 +148,49 @@ def main():
         return (sum(p[0] for p in pts) / len(pts),
                 sum(p[1] for p in pts) / len(pts))
 
-    before = truth_window(t_attack - 20, t_attack - 1)
-    # Bound the hold measurement: anything later includes the phase-3 transit
-    # and would report the whole leg as a response to the attack.
-    after = truth_window(t_attack + args.settle, t_attack + args.hold_window)
-    if not before or not after:
-        sys.exit("not enough data either side of the glitch")
+    expected = 0.0
+    if t_attack is not None:
+        before = truth_window(t_attack - 20, t_attack - 1)
+        # Bound the hold measurement: anything later includes the phase-3
+        # transit and would report the whole leg as a response to the attack.
+        after = truth_window(t_attack + args.settle,
+                             t_attack + args.hold_window)
+        if not before or not after:
+            sys.exit("not enough data either side of the glitch")
 
-    dn, de = ne(after[0] - before[0], after[1] - before[1], before[0])
-    injected = [o for o in offs if t_attack + args.settle < o[0]
-                <= t_attack + args.hold_window]
-    inj_n = sum(o[2] for o in injected) / len(injected)
-    inj_e = sum(o[3] for o in injected) / len(injected)
+        dn, de = ne(after[0] - before[0], after[1] - before[1], before[0])
+        injected = [o for o in offs if t_attack + args.settle < o[0]
+                    <= t_attack + args.hold_window]
+        inj_n = sum(o[2] for o in injected) / len(injected)
+        inj_e = sum(o[3] for o in injected) / len(injected)
 
-    print("\n--- what the AIRCRAFT physically did ---")
-    print(f"  injected GPS offset : N={inj_n:+.2f} m  E={inj_e:+.2f} m  "
-          f"|{math.hypot(inj_n, inj_e):.2f} m|")
-    print(f"  true position moved : N={dn:+.2f} m  E={de:+.2f} m  "
-          f"|{math.hypot(dn, de):.2f} m|")
+        print("\n--- what the AIRCRAFT physically did ---")
+        print(f"  injected GPS offset : N={inj_n:+.2f} m  E={inj_e:+.2f} m  "
+              f"|{math.hypot(inj_n, inj_e):.2f} m|")
+        print(f"  true position moved : N={dn:+.2f} m  E={de:+.2f} m  "
+              f"|{math.hypot(dn, de):.2f} m|")
 
-    expected = math.hypot(inj_n, inj_e)
-    actual = math.hypot(dn, de)
-    print("\n  while holding position (GUIDED):")
-    residual = math.hypot(dn + inj_n, de + inj_e)
-    if actual < expected * 0.25:
-        print("    aircraft did NOT move -- the step was absorbed without a")
-        print("    physical correction.")
-    elif residual < expected * 0.4:
-        print(f"    aircraft moved {actual:.2f} m, opposite the injected offset")
-        print(f"    (residual {residual:.2f} m): it repositioned to satisfy a")
-        print("    GPS that was lying to it, correcting a drift that never")
-        print("    happened.")
-    else:
-        print(f"    aircraft moved {actual:.2f} m (unclear relationship)")
+        expected = math.hypot(inj_n, inj_e)
+        actual = math.hypot(dn, de)
+        print("\n  while holding position (GUIDED):")
+        residual = math.hypot(dn + inj_n, de + inj_e)
+        if actual < expected * 0.25:
+            print("    aircraft did NOT move -- the step was absorbed without a")
+            print("    physical correction.")
+        elif residual < expected * 0.4:
+            print(f"    aircraft moved {actual:.2f} m, opposite the injected "
+                  "offset")
+            print(f"    (residual {residual:.2f} m): it repositioned to satisfy a")
+            print("    GPS that was lying to it, correcting a drift that never")
+            print("    happened.")
+        else:
+            print(f"    aircraft moved {actual:.2f} m (unclear relationship)")
 
     # Phase 3: told to fly to a known coordinate while the GPS is lying.
+    #
+    # Deliberately independent of the attack time, so a control run with no
+    # injection at all is measured exactly the same way -- that comparison is
+    # the whole point of running one.
     wp_lat, wp_lon = args.target
     final = truth_window(sim[-1][0] - 20, sim[-1][0] - 5)
     if final:
@@ -135,8 +202,14 @@ def main():
         print(f"  MISS DISTANCE: N={en:+.2f} m E={ee:+.2f} m  |{miss:.2f} m|")
         # Sanity check: a vehicle that never left the hold point will show a
         # "miss" equal to the whole leg length. That is a failed goto, not a
-        # navigation error caused by the attack.
-        start = truth_window(t_attack + args.settle, t_attack + args.settle + 15)
+        # navigation error caused by the attack. The leg is taken from where
+        # the aircraft was furthest from the waypoint -- the hold point, in
+        # this profile -- rather than from the attack time, which the control
+        # run does not have.
+        cand = [(t, la, lo_) for t, la, lo_ in sim if t <= sim[-1][0] - 20]
+        far = max(cand, key=lambda p: math.hypot(
+            *ne(p[1] - wp_lat, p[2] - wp_lon, wp_lat))) if cand else None
+        start = truth_window(far[0] - 5, far[0]) if far else None
         flew = 0.0
         if start:
             fn, fe = ne(final[0] - start[0], final[1] - start[1], start[0])
@@ -146,9 +219,12 @@ def main():
                              wp_lat))
         print(f"  distance actually flown in this phase: {flew:.2f} m "
               f"(leg length {leg:.2f} m)")
-        if flew < leg * 0.25:
+        if leg > 1.0 and flew < leg * 0.25:
             print("  => the aircraft never flew the leg; the goto did not")
             print("     execute. This says nothing about the attack.")
+        elif t_attack is None:
+            print(f"  => control run: flew the leg and arrived within "
+                  f"{miss:.2f} m.")
         elif miss > expected * 0.5:
             print(f"  => the aircraft flew to a point {miss:.2f} m from where it")
             print("     was told to go, while reporting that it had arrived.")
