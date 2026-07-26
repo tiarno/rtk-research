@@ -670,6 +670,56 @@ corrupted correction message. In both, the aircraft's physical displacement is
 **opposite** the injected offset (residual 0.01 m and 0.04 m respectively) —
 it repositions to correct a drift that never happened.
 
+That pair of runs is retained as the cross-validation, because agreeing
+component by component across two different methods is what makes either of
+them believable. **It is not the configuration the demo now runs**, for the
+reason below.
+
+#### The demo runs at `n1=211`, on a base sited to make it visible
+
+The runs above use `n1=212`, whose 512 m quantum happened to land on 2.435 m
+against that base. `n1=211` is the length that generalises — a 2 m quantum,
+so bounded error against *any* base station — but against `-3978242.4348` it
+produces 0.43 m, which is correct, universal, and invisible from the back of a
+room.
+
+Both problems go away by siting the base, which is free here because the base
+coordinate is ours to choose: `-3978243.8000` sits 1.80 m above the 2 m lattice
+point, so the reliable rung produces a visible error. Deliberately *not*
+`-3978243.9998`, which would maximise it at 1.9998 m but sit 0.2 mm from the
+boundary, where any sub-millimetre shift in the encode/decode path collapses the
+effect to ~0 and the demo silently shows nothing.
+
+**Say the quiet part on the slide:** the site was chosen so the error lands near
+the top of its range. At an arbitrary real base the `n1=211` error is uniform in
+`[0, 2) m` with a mean of 1 m. The *guarantee* is the bound, not the 1.8.
+
+Measured, stock parameters, control first:
+
+| | control, 0 injected | attacked, 520 injected |
+|---|---|---|
+| GPS vs. truth, before | 0.00 m | 0.00 m |
+| GPS vs. truth, after | 0.00 m (sustained max 0.06 m) | **1.45 m** |
+| injected offset | — | N +0.78  E −1.17  \|1.41 m\| |
+| displacement while holding in GUIDED | — | N −0.78  E +1.12  **\|1.36 m\|, opposite** (residual **0.05 m**) |
+| commanded-waypoint miss | **0.03 m** | **1.39 m** |
+| distance flown on the leg | 29.94 m of 29.91 m | 29.60 m of 30.33 m |
+| clean flight before the attack | — | airborne t=53.7 s, attack t=85.0 s (**31 s**) |
+
+The control lands within **3 cm** — better than the 4 cm the previous base gave,
+so nothing about the new siting hurt the harness. The horizontal figure was
+predicted at 1.42 m before the run, from the 1.80 m ECEF error scaled by the
+previously measured 2.435 → 1.92 ratio; it measured **1.41 m**. That agreement
+is worth more than the number itself: it means the bit-level truncation model,
+the ECEF-to-local geometry, and the vehicle response compose predictably.
+
+The cost of the change is 0.5 m of drama. What it buys is that nothing in the
+demo depends on a coincidence: **1.8 m here, under 2 m everywhere, no knowledge
+of the base coordinates required.**
+
+Note the remaining ~1.1 m is vertical (1.80 m ECEF against 1.41 m horizontal)
+and is **not measured at the aircraft** — `parse_sitl_log.py` computes N/E only.
+
 **Three harness defects had to be fixed first, and all three produced results
 that looked like attack effects.**
 

@@ -103,16 +103,21 @@ anything unusual is upstream — it just sees a healthy, high-confidence fix.
 **6. The drone flies to the wrong place.**
 An autopilot receiving that position:
 
-- while **hovering**, physically moved about **two metres sideways** —
-  correcting a drift that never happened
-- when told to **fly to a specific coordinate**, stopped roughly **two metres
-  away from it, and reported that it had arrived** — 1.9 m either way, whether
-  the error was handed to it directly or it computed the error itself from the
-  attacker's message
+- while **hovering**, physically moved **sideways** — correcting a drift that
+  never happened
+- when told to **fly to a specific coordinate**, stopped **short of it and
+  reported that it had arrived**
+
+How far depends on the base station, because the attacker is erasing digits off
+*its* coordinates and gets whatever those digits happened to be. On the reliable
+setting it is always under two metres. The runs here measured **1.4 m**, and a
+larger variant of the same attack measured **1.9 m** — the same behaviour either
+way, whether the error was handed to the drone directly or it worked the error
+out for itself from the attacker's message.
 
 A machine that is confidently wrong is more dangerous than one that knows it is
-broken. Two metres is several crop rows, half a road lane, or the difference
-between the landing pad and what's beside it.
+broken. A metre and a half is a crop row or two, a third of a road lane, or the
+difference between the landing pad and what's beside it.
 
 ---
 
@@ -196,16 +201,18 @@ attack, once with the attacker switched off and everything else identical.
 
 | | attacker off | attacker on |
 |---|---|---|
-| how far the GPS was lying | 0 cm | **1.92 m** |
-| moved sideways while hovering | — | **1.86 m** |
-| missed the target coordinate by | **4 cm** | **1.86 m** |
+| how far the GPS was lying | 0 cm | **1.45 m** |
+| moved sideways while hovering | — | **1.36 m** |
+| missed the target coordinate by | **3 cm** | **1.39 m** |
 
-Clean, the drone parks within a hand's width of where it was told to go. Under
-attack, it stops nearly two metres away and reports that it has arrived. That
-second column is close to the 1.9 metres the separate test produced, which is
-the reassuring part: two quite different setups, the same answer — and not just
-the same distance, but the same direction, agreeing to within 5 cm north and
-east.
+Clean, the drone parks within a hand's width of where it was told to go — three
+centimetres. Under attack, it stops a metre and a half away and reports that it
+has arrived.
+
+The reassuring part is a separate check run at a larger setting, where the two
+quite different setups produced the same answer — not just the same distance but
+the same direction, agreeing to within 5 cm north and east. Two ways of asking
+the question, one answer.
 
 **Why that "attacker off" column matters more than it looks.** The first time
 this chain ran, the drone wandered 113 metres and we nearly had a spectacular

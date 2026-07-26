@@ -230,16 +230,16 @@ Committed in `5b9a0f5` (the stock-parameter demo):
 | branch | `master` |
 | RTKLIB | `~/RTKLIB` in WSL, branch `rtklib_2.4.3`, commit `180043e` |
 | ArduPilot SITL | `~/apsitl/arducopter` (prebuilt ArduCopter 4.7.0) |
-| run command | `RTKLIB=/home/tim/RTKLIB BIN=/home/tim/apsitl/arducopter bash ./loop_demo.sh 212` from `/mnt/c/Users/tim/work/rtk/research` in WSL Ubuntu |
-| control run | the same with `0` instead of `212` — injection disabled. Run it *first*; it should land within centimetres |
+| run command | `RTKLIB=/home/tim/RTKLIB BIN=/home/tim/apsitl/arducopter bash ./loop_demo.sh` from `/mnt/c/Users/tim/work/rtk/research` in WSL Ubuntu — `LEN` now defaults to 211 |
+| control run | the same with `0` — injection disabled. Run it *first*; it should land within centimetres (last: 0.03 m) |
 | latency probe | `RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 90` — no vehicle, prints the loop delay |
-| `LEN` | 212 — declared `rectype` length, selects a 2.4 m base error |
+| `LEN` | **211** — the rung that generalises: a 2 m quantum, so bounded error against any base. 212 was a 512 m quantum that happened to land on 2.4 m against the old base |
 | attack trigger | `$T/attack.go`, created by the flight driver at phase 2. Replaced the `DELAY` timer, which raced the takeoff |
 | speed check | `MODE=speed RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 45` — no vehicle; feeds a 1 m/s ramp, prints the ground speed the RMC reports |
 | `NMEA_VEL` | `1` in `loop_demo.sh` — harness formats the NMEA and derives the velocity. Unset reverts to RTKLIB's writer and the documented file/serial runs |
 | `RUN` | 260 s — must outlast the whole flight profile or SITL loses its GPS mid-flight |
 | ports | 5901 base, 5902 rover, 5911 relay, 5903 NMEA, 5760 SITL SERIAL0, 5762 SERIAL1 |
-| base ECEF | `-3978242.4348,3382841.1715,3649902.7667` |
+| base ECEF | `-3978243.8000,3382841.1715,3649902.7667` — sited 1.80 m above the 2 m lattice point so `n1=211` is visible. Not `-3978243.9998`: 0.2 mm from the boundary would collapse to ~0 under any sub-mm shift. The old `-3978242.4348` gives 0.43 m at 211 |
 | scratch | `/tmp/rtk-loop` (logs: `sim.log`, `relay.log`, `rtklib.log`, `mavpos.log`, `sitl.log`, `flight.log`) |
 
 Two environment traps worth remembering:

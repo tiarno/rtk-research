@@ -25,7 +25,14 @@
 
 RTKLIB="${RTKLIB:?set RTKLIB to your RTKLIB checkout}"
 BIN="${BIN:-$HOME/apsitl/arducopter}"
-LEN="${1:-212}"
+# 211, not 212. Zeroing four bytes of pos[0] quantises ECEF X to a 2 m lattice,
+# so the induced error is bounded by one quantum for ANY base station -- always
+# enough to matter, never enough to lose the fix, with no knowledge of the base
+# coordinates. 212 zeroes five bytes: a 512 m quantum, which happened to land on
+# 2.435 m against the old base and would have been 29 m against a different one.
+# The demo runs on the rung that generalises. See "The dial has four rungs" in
+# research/README.md.
+LEN="${1:-211}"
 # Must outlast the whole profile: ~40 s of staged startup, then EKF settle,
 # arm and takeoff, then hold + attack + goto + land. If the streams stop
 # first, SITL loses its GPS mid-flight and the run ends in a connection reset
@@ -38,11 +45,19 @@ mkdir -p "$T"
 rm -f "$TRIG"
 export LIBC_FATAL_STDERR_=1
 
-BASE_ECEF=-3978242.4348,3382841.1715,3649902.7667
+# Sited so the n1=211 truncation is visible. The error at that length is
+# |X| mod 2, which is 0.43 m at the old -3978242.4348 -- correct, universal, and
+# too small to see from the back of a room. -3978243.8000 sits 1.80 m above the
+# 2 m lattice point, and deliberately not 1.9998: a base 0.2 mm from the
+# boundary would collapse to a ~0 m error under any sub-millimetre shift, and a
+# live demo that silently shows nothing is worse than a smaller number.
+# At an arbitrary real base the error is uniform in [0, 2) m, mean 1 m -- say so
+# rather than implying 1.8 is what everyone gets.
+BASE_ECEF=-3978243.8000,3382841.1715,3649902.7667
 HOME_LLH=$(python3 -c "
 import math
 a=6378137.0; f=1/298.257223563; e2=f*(2-f)
-x,y,z=(-3978242.4348,3382841.1715,3649902.7667)
+x,y,z=(-3978243.8000,3382841.1715,3649902.7667)
 lon=math.atan2(y,x); p=math.hypot(x,y); lat=math.atan2(z,p*(1-e2))
 for _ in range(8):
     N=a/math.sqrt(1-e2*math.sin(lat)**2); h=p/math.cos(lat)-N
