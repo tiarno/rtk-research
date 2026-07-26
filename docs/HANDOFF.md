@@ -1,6 +1,43 @@
 # Handoff Notes
 
-**Session date:** 2026-07-25
+**Session date:** 2026-07-26 (previous session 2026-07-25)
+
+## Since the last handoff
+
+Two things closed out. Both are written up in
+[research/README.md](../research/README.md); this is the summary.
+
+**The closed loop works and the numbers are trustworthy.** The blocker below
+turned out not to be latency — that measured 130 ms, faster than a real GPS.
+The real cause was RTKLIB's NMEA reporting 0.00 knots regardless of motion,
+which ArduPilot's EKF3 fuses by default; `EK3_SRC1_VELXY 0` fixes it.
+`prcopt.dynamics` does *not*, measured against a known 1 m/s ramp.
+
+|  | control, 0 injected | attacked, 691 injected |
+|---|---|---|
+| GPS vs. truth after | 0.00 m | 2.08 m |
+| displacement holding | — | 2.16 m |
+| waypoint miss | 0.09 m | 1.81 m |
+
+Agrees with the open-loop figures (1.90 m, 1.87 m) measured a different way.
+**Always run `./loop_demo.sh 0` first** — two harness defects produced
+attack-shaped displacements of 26 m and 113 m with no attack present.
+
+**The shipped Windows binaries are measured, not asserted.** `convbin.exe` from
+both the official distribution and demo5 2.5.1 corrupt the station coordinate
+silently, rc=0, with the magnitude dial reproducing to the last digit and 32-bit
+and 64-bit identical. `_FORTIFY_SOURCE` is glibc-only; these are Embarcadero
+builds where the abort has no equivalent to enable.
+
+Open items now: the displacement *direction* does not line up between the
+closed and open loop runs (magnitudes do — quote those, not the sign); the
+`EK3_SRC1_VELXY` workaround is a deviation from stock config forced by the
+harness; no embedded receiver firmware examined; ARM untested.
+
+---
+
+Everything below is from the 2026-07-25 session and is retained for the
+reasoning, not as current state.
 
 The authoritative record of the research itself is
 [research/README.md](../research/README.md). This file is only the working
