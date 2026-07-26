@@ -22,7 +22,7 @@ this turns out to be the most important fact here:
 
 | build | outcome |
 |---|---|
-| glibc `_FORTIFY_SOURCE` active (`-O1`+ on most distros, the default for distro packages) | the fortified `strncpy` detects the overflow and **aborts the process** — one packet is a remote DoS |
+| glibc `_FORTIFY_SOURCE` active (`-O1`+ and the flag actually reaching the compiler) | the fortified `strncpy` detects the overflow and **aborts the process** — one packet is a remote DoS |
 | unfortified (`-O0`, or a toolchain without `_FORTIFY_SOURCE` — the norm for embedded/firmware builds) | the write goes through **silently** — tunable position corruption |
 
 In the unfortified case the interesting band is a small one. A shift of
@@ -274,6 +274,51 @@ else if (ret==5) { /* antenna position parameters */
   `postpos.c:1038` still guards the post-processing path with
   `norm(sta[i].pos,3)>0.0`. The same asymmetry as upstream: the real-time path
   is the unguarded one.
+
+### The distro package is unfortified too, and it is ARM
+
+Chasing the Reach binary turned up something better on the way. Emlid's Navio
+image ships no RTKLIB at all (checked: the only hits in a 3.7 GB rootfs are
+OpenLDAP symbols matching `str2str` as a substring, plus one APT metadata
+stanza) — but that stanza revealed that **Debian packages RTKLIB**, and the
+packaged version is `2.4.3.b34+dfsg`, the exact upstream release measured here.
+It is built for **12 architectures**: amd64, arm64, armel, armhf, i386,
+loong64, mips64el, mipsel, ppc64el, riscv64, s390x.
+
+Measured on `rtklib_2.4.3.b34+dfsg-1+b2_armhf.deb` from the Debian pool:
+
+| | |
+|---|---|
+| binaries | `rtkrcv`, `str2str`, `convbin`, `rnx2rtkp`, `pos2kml` |
+| format | ELF 32-bit LSB, **ARM EABI5** |
+| decoder location | statically linked *inside* each app — `rtkrcv` needs only `libm`/`libc`, and carries the `rtcm3 1033 length error` and `ant=%s:%s rec=%s:%s:%s` trace strings |
+| `__strncpy_chk` | **absent** |
+| any `*_chk` import | **none at all** |
+| plain `strncpy`/`strcpy`/`sprintf`/`memcpy`/`fprintf` | all present |
+
+Plain names present and zero fortified variants is the signature of a build
+without `_FORTIFY_SOURCE`. Had it been active, `strncpy` into a known-size
+`char[64]` with a runtime length is exactly the call that becomes
+`__strncpy_chk`, and `sprintf`/`fprintf` would have gone the same way.
+
+**This refutes a prediction made earlier in this work.** The expectation was
+that Linux targets — distro packages and Linux-based receivers — would land in
+the *fortified* column, aborting rather than corrupting, opposite the Windows
+desktop applications. They do not. Debian's own package escapes the hardening
+its distro policy nominally applies, presumably because RTKLIB's upstream
+makefiles override the injected `CFLAGS`. So `apt install rtklib` on
+Debian/Raspbian, on ARM, is in the **silent corruption** column with everything
+else.
+
+The abort column is now looking like the exception rather than the rule: it is
+what you get by compiling it yourself with the right flags, and not what any
+build measured so far — two Windows distributions and one Linux/ARM distro
+package — actually does.
+
+That also supplies the first real ARM binary in this work, which weakens the
+case for the qemu offset exercise: ARM builds exist, ship, and are unfortified.
+It does not by itself confirm the `sta_t` offsets on ARM, which still want
+checking before a payload length is claimed for that target.
 
 **Why this matters more than the desktop result.** ArduPilot documents Reach as
 a supported RTK GPS: the unit mounts on the vehicle, outputs coordinates to the
@@ -864,10 +909,11 @@ Read these before quoting anything above.
   run". Emlid Reach's **source** is now confirmed to carry the defect and the
   unvalidated adoption, with a layout that takes the same payload lengths (see
   "A shipping receiver runs this code"), but **no receiver firmware binary has
-  been examined**. Reach is Linux-based and would plausibly land in the
-  *fortified* column — the opposite of the desktop applications, and a
-  different headline: one packet as a remote DoS on a survey receiver rather
-  than a silent metre-scale lie. Until a binary is checked, say "the source is
-  affected", not "the product behaves this way".
+  been examined**. The earlier expectation that Linux targets land in the
+  *fortified* column is now **refuted for distro builds** — Debian's own
+  armhf package imports no `*_chk` at all (see "The distro package is
+  unfortified too") — which removes the basis for predicting that Reach
+  aborts. Reach's own firmware is still unmeasured either way. Until a binary
+  is checked, say "the source is affected", not "the product behaves this way".
 - `dgps` being zeroed is guarded at `rtcm2.c:71` (`if (rtcm->dgps)`), so it
   silently disables DGPS correction output rather than faulting.

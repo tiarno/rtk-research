@@ -175,15 +175,25 @@ converts "a bug in a hobby library" into "a bug in a product you can buy", and
 ArduPilot documents Reach feeding a flight controller over ERB with corrections
 arriving on the telemetry radio — the harness chain with a real product in it.
 
-*Still open: which column the shipped binary is in.* `files.emlid.com` 403s all
-image paths, the Flash Tool fetches at runtime, and the Wayback holds only the
-Navio Raspbian images (different product, RTKLIB not confirmed present). Three
-ways forward, in cost order: observe what URL the Flash Tool fetches (free,
-uncertain); pull the 718 MB Navio image on the chance it ships Emlid-built
-RTKLIB ARM binaries (~45 min, speculative, but would also settle the ARM
-offsets in item 1 with a real binary instead of qemu); buy a Reach M2 (~$300,
-certain). Until one of these lands, the claim is "the source is affected", not
-"the product behaves this way".
+*The Navio image was pulled and is a dead end for RTKLIB, but paid off anyway.*
+`emlid-raspbian-20220608.img` (718 MB, sha256 `d16b66d5…`) ships **no RTKLIB**:
+in the whole 3.7 GB rootfs the only `str2str` hits are OpenLDAP symbols matching
+as a substring, and the only `RTKLIB` hit is an APT metadata stanza. Read
+rootless with `debugfs` on a `dd`-carved partition — no `sudo`, which the
+project settings deny.
+
+That APT stanza is what paid off: **Debian packages RTKLIB 2.4.3.b34**, the
+exact version measured here, for 12 architectures. The armhf console apps were
+fetched and checked, and they **refute the prediction that Linux targets abort**
+— no `*_chk` imports at all, plain `strncpy`/`sprintf` present, decoder
+statically inside `rtkrcv`. Written up as "The distro package is unfortified
+too" in `research/README.md`. Every build actually measured now — two Windows
+distributions and one Linux/ARM distro package — is in the silent column.
+
+*Still open: the Reach firmware binary itself.* `files.emlid.com` 403s all
+image paths and the Flash Tool fetches at runtime. Two ways left: observe what
+URL the Flash Tool requests (free, uncertain), or buy a Reach M2 (~$300,
+certain). Note the prediction that it would abort no longer has a basis.
 
 **Deliberately not doing: RF delivery.** Technically easy with the Heltec gear,
 but 433/915 MHz is where real survey and agricultural rigs operate. "No RF was
