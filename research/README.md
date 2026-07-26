@@ -881,12 +881,35 @@ with a different toolchain (gcc/glibc vs. Apple clang).
 | `loop_demo.sh` | the closed loop — packet to propeller in one run (`0` for the control) |
 | `loop_latency.py` / `.sh` | loop delay with no vehicle in it; `MODE=speed` checks the reported ground speed and course against a fed ramp |
 | `sign_check.py` | truth, GPS and EKF traces in one frame — which way the aircraft moved, and why |
+| `check_fork.sh` | is a given RTKLIB fork still vulnerable — unclamped copy, `offsetof(sta_t,pos)`, and whether the real-time path adopts the coordinate unguarded |
+| `check_binary.sh` | which column a shipped binary falls into: `*_chk` imports, and whether the 1033 decoder is actually in the binary being tested |
+| `check_image.sh` | look inside a firmware/OS image for RTKLIB without root — `dd` + `debugfs`, no mounting |
+| `pick_base.py` | what each `n1` rung does to a given base coordinate, and where to site a demo base so the reliable rung is also a visible one |
 
 ```sh
 git clone -b rtklib_2.4.3 https://github.com/tomojitakasu/RTKLIB
 RTKLIB=./RTKLIB ./run.sh
 RTKLIB=./RTKLIB ASAN=1 ./run.sh
 ```
+
+**Reproducing the provenance claims.** The three "is it really in X" findings
+are re-runnable rather than asserted:
+
+```sh
+./check_fork.sh emlid/RTKLIB reach          # the Reach fork: still vulnerable?
+./check_fork.sh tomojitakasu/RTKLIB rtklib_2.4.3   # upstream, for comparison
+
+curl -O http://deb.debian.org/debian/pool/main/r/rtklib/rtklib_2.4.3.b34+dfsg-1+b2_armhf.deb
+./check_binary.sh rtklib_2.4.3.b34+dfsg-1+b2_armhf.deb   # fortified or not?
+
+./check_image.sh some-firmware.img          # rootless: is RTKLIB in there?
+./pick_base.py --explain -3978243.8000      # what each rung does to the demo base
+```
+
+`check_fork.sh` computes `offsetof(sta_t,pos)` from the fork's own header
+rather than assuming it, because that offset is what decides whether the
+payload lengths measured here transfer to that target unchanged. It prints the
+number so it can be checked by hand against the 464 derived above.
 
 `harness.c` reproduces the base-position adoption from `update_antpos()`
 verbatim rather than linking the whole server; the copied block is marked and
