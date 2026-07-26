@@ -50,10 +50,11 @@ base actually is, the lie lands somewhere under two metres — big enough to
 matter to someone who paid for centimetres, small enough that nothing complains.
 The attacker doesn't need to know where the base station is to get that.
 
-(The next rung up rounds to a *five-hundred*-metre grid. Against the base
-station used in the demo that happens to come out at 2.4 m, which is why the
-demo uses it. Against a different base it would come out at 29 m and be thrown
-away. That one is luck; the two-metre rung is not.)
+(The next rung up rounds to a *five-hundred*-metre grid. Against one base
+station that happened to come out at 2.4 m — which is where this work's
+original headline number came from — and against another it came out at 29 m,
+which any receiver throws away. That rung is luck. The two-metre rung is not,
+and it is the one the demo runs on.)
 
 ---
 
@@ -144,8 +145,15 @@ compiler and different libraries, where that feature does not exist to switch
 on. So for the software almost everyone actually runs, the loud version is not
 an option that was declined — it was never on the menu.
 
-**The silent version is the normal case, not the exotic one.** You only get the
-loud crash if you compile it yourself on Linux.
+We expected Linux to be the safe side of that line. It isn't. Debian — a Linux
+distribution with a formal policy of turning this protection on — ships its own
+copy of this software for **twelve** different processor types, and we checked
+one: the protection is absent there too. So `install this from your Linux
+distribution` lands in the silent column alongside the Windows downloads.
+
+**The silent version is the normal case, not the exotic one.** The loud crash
+is what you get by compiling it yourself with the right settings — not what
+anybody ships.
 
 Worth noting: Demo5 released a new version **13 days after this bug was made
 public**, and it still contains it. The original project hasn't been updated
@@ -155,6 +163,33 @@ Nor is a fix coming. The bug reports have sat open and unanswered since June
 2026 — the person who reported them offered to file the paperwork for an
 official vulnerability ID and got no reply. "Wait for the patch" is not advice
 that means anything on a project nobody is maintaining.
+
+## Is this in anything you can buy?
+
+Everything above is software you download onto a computer. The obvious question
+is whether it is in any actual *device*.
+
+It is in the source code of one. Emlid make survey-grade GPS receivers called
+Reach, and they publish the code those receivers run — their own copy of this
+same software. We read it. The flaw is there, untouched: the same missing
+check, the same layout, so the very same malicious message works against it
+without changing a single byte. And the part that takes the corrupted
+coordinate and starts navigating from it is there too.
+
+That matters because of what a Reach is plugged into. The drone autopilot
+project ArduPilot documents Reach as a supported GPS: you bolt it to the
+aircraft, it feeds position to the flight controller over a wire, and — in
+their own words — it can take its base-station corrections over the same radio
+link the drone already uses for telemetry. That is the exact chain in this
+writeup, with a real product where our simulation has a stand-in, and an
+unauthenticated radio link feeding it.
+
+**What we have not done is test the device itself.** We read the source, not
+the receiver. We could not get the firmware without buying one, and the two
+possibilities lead to different headlines: either it corrupts the position
+silently like everything else measured, or it crashes and one message knocks a
+survey receiver off the air. Both are bad. We do not know which, and we are
+not going to guess.
 
 ## What is new here
 
@@ -168,13 +203,17 @@ here:
 
 - **The fields that reach the coordinates.** Only three of the five can, and the
   one their proof-of-concept uses is not among them.
-- **The length byte is a dial**, from a five-millimetre nudge to total
-  destruction, and the interesting setting is the small one.
+- **The length byte is a coarse dial** — millimetres, metres, kilometres,
+  planets — and one of its settings gives an under-two-metre error against any
+  base station in the world, without knowing anything about it.
 - **The receiver never notices.** It reports its highest quality flag, at every
   single moment, identically to a clean run.
-- **Which real builds are affected, by running them.** The programs people
-  download corrupt the coordinate silently. The loud crash only happens on a
-  build almost nobody uses.
+- **Which real builds are affected, by running them.** Everything anybody
+  ships — both Windows downloads and a Linux distribution's own package, on
+  ARM — corrupts the coordinate silently. The loud crash is what you get by
+  building it yourself.
+- **That the source runs in a product you can buy** (Emlid Reach), which
+  ArduPilot documents as a drone GPS.
 - **What a vehicle does about it** — measured two independent ways, including
   one where the drone computes the false position for itself from the message.
 

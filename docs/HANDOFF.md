@@ -4,12 +4,16 @@
 
 ## Current state, in one paragraph
 
-The closed loop works, runs on a **stock ArduPilot parameter set**, and its
-numbers agree with the independently measured open-loop run to within 5 cm per
-component — magnitude *and* direction. Both of the priorities the last handoff
-opened with are done and committed (`e973bdd`, `5b9a0f5`); the working tree is
-clean. Nothing is blocked. The next item is ARM offsets under qemu-user, ~1
-hour, near-certain outcome, and nothing downstream depends on it.
+The closed loop works on a **stock ArduPilot parameter set** and now runs at
+**`n1=211`** — the rung whose 2 m quantum bounds the error against *any* base
+station, rather than `n1=212`, whose 512 m quantum happened to land on 2.4 m
+against the old base. Control 0.03 m, attacked 1.39 m waypoint miss, 1.36 m
+displacement opposite the offset. Two claims that were load-bearing earlier are
+now **refuted by measurement and corrected in every document**: that
+fortification is the distro default (Debian's own `rtklib`, on ARM, imports no
+`*_chk` at all) and that the length byte is a fine-grained dial (four rungs,
+each 256× the last). The defect is confirmed present in Emlid's `reach` fork,
+so this is a product bug and not only a library bug. Nothing is blocked.
 
 The one thing to carry forward: **run `./loop_demo.sh 0` before quoting any
 closed-loop number.** Three harness defects have produced attack-shaped results
@@ -147,11 +151,12 @@ reliability matters as much as the numbers.
 Effort figures are rough and assume the environment is already set up (see Key
 Parameters).
 
-**1. ARM offsets — ~1 hour, near-certain outcome.** Cross-compile the offset
-probe for aarch64 and run it under qemu-user. The 32-vs-64-bit result already
-showed why it should be identical: everything ahead of `pos` in `sta_t` is
-`char` arrays and `int`s. Cheaply converts a stated unknown into "one payload
-length works on every target checked".
+**1. ARM offsets — mostly overtaken, ~30 min if wanted.** Debian's shipped
+armhf binaries are now in hand (`/tmp/deb`), so ARM builds no longer need qemu
+to exist — but the `sta_t` offsets on ARM are still unconfirmed, and that is
+what a payload length for an ARM target depends on. Cheapest remaining version:
+compile the offset probe with `arm-linux-gnueabihf-gcc` and print
+`offsetof(sta_t,pos)`; no emulation needed since nothing has to run.
 
 **2. `decode_type1007` / `1008` — ~1 hour.** Same harness, different message
 type. Expect a negative result worth stating precisely: those fields stop short

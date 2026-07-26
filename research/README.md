@@ -12,10 +12,12 @@ type 1033 decoder.
 ## Summary
 
 A single well-formed RTCM3 type 1033 message — correct length field, correct
-CRC24Q, valid station ID — corrupts a rover's base-station coordinates by an
-**attacker-tunable amount**. Choosing the length byte selects the magnitude,
-from imperceptible, through a silent few-metre error, up to total loss of
-solution.
+CRC24Q, valid station ID — corrupts a rover's base-station coordinates. The
+declared length selects the *scale* of the error, not its value: each extra
+zeroed byte multiplies the truncation quantum by 256, giving a handful of
+usable rungs from imperceptible, through a silent metre-scale error, up to
+total loss of solution. One rung (`n1=211`, a 2 m quantum) bounds the error
+under 2 m against **any** base station, with no knowledge of its coordinates.
 
 **Which of two things happens depends on how the binary was compiled**, and
 this turns out to be the most important fact here:
@@ -23,7 +25,7 @@ this turns out to be the most important fact here:
 | build | outcome |
 |---|---|
 | glibc `_FORTIFY_SOURCE` active (`-O1`+ and the flag actually reaching the compiler) | the fortified `strncpy` detects the overflow and **aborts the process** — one packet is a remote DoS |
-| unfortified (`-O0`, or a toolchain without `_FORTIFY_SOURCE` — the norm for embedded/firmware builds) | the write goes through **silently** — tunable position corruption |
+| unfortified — **every build measured so far**: both Windows distributions, and Debian's own `rtklib` package on ARM | the write goes through **silently** — position corruption |
 
 In the unfortified case the interesting band is a small one. A shift of
 ~0.4-2.5 m leaves RTKLIB reporting **Q=1 (RTK fixed)** — its highest quality
@@ -176,11 +178,14 @@ any base station anywhere.** No knowledge of the base coordinates is required.
 The error for the two bases tested is 1.47 m and 0.43 m.
 
 `n1=212` is the opposite: a 512 m quantum, so the outcome is a coin toss. It
-gives 2.435 m against the end-to-end base — which is why it is the length used
-throughout the live demo — and 29.5 m against this one, where it would simply
-be rejected. **The 2.4 m headline is that die landing well, not a magnitude
-the attacker selected.** Both facts belong in any presentation of this: 211 is
-the reliable attack, 212 is the dramatic one, and they are not the same claim.
+gives 2.435 m against the original end-to-end base and 29.5 m against this one,
+where it would simply be rejected. **The 2.4 m figure that headlined this work
+is that die landing well, not a magnitude the attacker selected.**
+
+The live demo has since been moved onto `n1=211` for exactly this reason, with
+the base sited so the reliable rung is also a visible one — see "The demo runs
+at `n1=211`" below. The 212 runs are retained as the cross-validation against
+the open-loop measurement, not as the demo configuration.
 
 ### The same dial on the binaries people actually run
 
