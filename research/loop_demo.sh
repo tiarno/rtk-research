@@ -79,6 +79,7 @@ SR1_POSITION 10
 SR1_EXTRA1 10
 SR1_EXTRA3 10
 SR1_EXT_STAT 10
+EK3_SRC1_VELXY 0
 EOF
 
 AP_DEF="$HOME/ardupilot/Tools/autotest/default_params/copter.parm"
@@ -104,8 +105,15 @@ python3 "$HERE/inject_relay.py" --listen 5911 --upstream 127.0.0.1:5901 \
     --len "$LEN" --delay "$DELAY" > "$T/relay.log" 2>&1 &
 sleep 4
 
+# RTKLIB emits RMC with a speed of 0.00 no matter how fast the rover is moving
+# -- measured at a known 1 m/s, and prcopt.dynamics does NOT change it, so the
+# solution carries no velocity to format. An autopilot fusing that is being told
+# it is stationary mid-flight, which destabilises it with no attack involved, so
+# EK3_SRC1_VELXY above stops the EKF using GPS velocity at all. DYNAMICS is kept
+# as a knob because the harness prints the solution speed and it is the thing to
+# re-check if this is ever fixed upstream.
 echo "### 3. RTKLIB: rover :5902, base via relay :5911, NMEA out :5903 ###"
-NMEA_TCP=:5903 "$T/e2e_loop" 127.0.0.1:5902 127.0.0.1:5911 "$RUN" 1 tcp \
+DYNAMICS=1 NMEA_TCP=:5903 "$T/e2e_loop" 127.0.0.1:5902 127.0.0.1:5911 "$RUN" 1 tcp \
     > "$T/rtklib.log" 2>&1 &
 sleep 6
 

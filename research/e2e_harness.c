@@ -81,6 +81,20 @@ int main(int argc, char **argv)
     prcopt.refpos  = POSOPT_RTCM;   /* <- base position from RTCM */
     prcopt.rovpos  = POSOPT_SINGLE;
 
+    /*
+     * DYNAMICS=1 adds velocity states to the filter, which is what makes the
+     * NMEA RMC sentence carry a real speed and course: outnmea_rmc() derives
+     * both from the solution velocity, and with dynamics off that velocity is
+     * identically zero. A receiver reporting 0 knots while the vehicle flies
+     * is not a harmless cosmetic defect -- ArduPilot's EKF3 fuses GPS velocity
+     * by default, so it destabilises the aircraft as soon as it moves, which
+     * is exactly what happened in the closed loop.
+     *
+     * Off by default so the file and serial runs documented in README.md
+     * reproduce byte for byte; loop_demo.sh turns it on.
+     */
+    if (getenv("DYNAMICS")) prcopt.dynamics = 1;
+
     if (serial || (argc >= 6 && !strcmp(argv[5], "tcp"))) {
         /* Paths are used verbatim; an external feeder paces the bytes. */
         snprintf(rovpath, sizeof(rovpath), "%s", argv[1]);
@@ -155,9 +169,15 @@ int main(int argc, char **argv)
                 time2str(sol.time, tstr, 1);
                 if (getenv("PRINT_ALL") || sol.stat != lastq || nout < 3 ||
                     fabs(rb[0] - rb_prev[0]) > 1e-6) {
-                    printf("%-10s %-3d %14.9f %15.9f %10.4f  %.3f %.3f %.3f\n",
+                    /* Solution speed is printed because the NMEA RMC the
+                     * autopilot consumes derives its speed from it, and a
+                     * receiver reporting 0 knots while the vehicle moves
+                     * destabilises the vehicle. It is only non-zero when
+                     * velocity states exist -- see DYNAMICS above. */
+                    printf("%-10s %-3d %14.9f %15.9f %10.4f  %.3f %.3f %.3f"
+                           "  v=%.3f\n",
                            tstr + 11, sol.stat, pos[0] * R2D, pos[1] * R2D,
-                           pos[2], rb[0], rb[1], rb[2]);
+                           pos[2], rb[0], rb[1], rb[2], norm(sol.rr + 3, 3));
                 }
                 lastq = sol.stat;
                 for (j = 0; j < 3; j++) rb_prev[j] = rb[j];
