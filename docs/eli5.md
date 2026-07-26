@@ -38,9 +38,22 @@ But erasing part of a number changes it. Erase the tail of -3978242.4348 and
 you get -3978240.0000. Still a perfectly plausible coordinate — just
 **2.4 metres wrong**.
 
-And the length number is a **dial**. Erase a little, small lie. Erase a lot,
-obvious garbage that gets rejected. The attack lives in the narrow band where
-the lie is small enough to be believed.
+And the length number is a **coarse dial** — coarser than you'd think. Each
+extra letter you claim erases one more digit of the coordinate, and erasing one
+more digit multiplies the damage by 256. So there is no fine adjustment: the
+settings run roughly *millimetres, metres, kilometres, planets*. Two of those
+are useless to an attacker and one of them is rejected.
+
+The useful setting is the "metres" one, and it is useful **everywhere**. It
+rounds the base station's position off to a two-metre grid, so wherever the
+base actually is, the lie lands somewhere under two metres — big enough to
+matter to someone who paid for centimetres, small enough that nothing complains.
+The attacker doesn't need to know where the base station is to get that.
+
+(The next rung up rounds to a *five-hundred*-metre grid. Against the base
+station used in the demo that happens to come out at 2.4 m, which is why the
+demo uses it. Against a different base it would come out at 29 m and be thrown
+away. That one is luck; the two-metre rung is not.)
 
 ---
 
@@ -93,8 +106,9 @@ An autopilot receiving that position:
 - while **hovering**, physically moved about **two metres sideways** —
   correcting a drift that never happened
 - when told to **fly to a specific coordinate**, stopped roughly **two metres
-  away from it, and reported that it had arrived** (1.9 m handed the error
-  directly; 1.8 m with the drone computing it from the message itself)
+  away from it, and reported that it had arrived** — 1.9 m either way, whether
+  the error was handed to it directly or it computed the error itself from the
+  attacker's message
 
 A machine that is confidently wrong is more dangerous than one that knows it is
 broken. Two metres is several crop rows, half a road lane, or the difference
@@ -182,13 +196,16 @@ attack, once with the attacker switched off and everything else identical.
 
 | | attacker off | attacker on |
 |---|---|---|
-| how far the GPS was lying | 1 cm | **2.1 m** |
-| missed the target coordinate by | **9 cm** | **1.8 m** |
+| how far the GPS was lying | 0 cm | **1.92 m** |
+| moved sideways while hovering | — | **1.86 m** |
+| missed the target coordinate by | **4 cm** | **1.86 m** |
 
 Clean, the drone parks within a hand's width of where it was told to go. Under
 attack, it stops nearly two metres away and reports that it has arrived. That
 second column is close to the 1.9 metres the separate test produced, which is
-the reassuring part: two quite different setups, the same answer.
+the reassuring part: two quite different setups, the same answer — and not just
+the same distance, but the same direction, agreeing to within 5 cm north and
+east.
 
 **Why that "attacker off" column matters more than it looks.** The first time
 this chain ran, the drone wandered 113 metres and we nearly had a spectacular
@@ -198,10 +215,15 @@ itself moving, fought its own navigation until it lost the argument. With the
 attacker switched off it wandered just as badly. Any test where you cannot
 switch the attack off is not a test.
 
-Three further limits. To keep the closed-loop drone stable we had to switch off
-one setting the autopilot normally uses, because of that missing speed report —
-a workaround for our rig, not something an attacker gets to choose, and a real
-receiver would not need it. The correction link also has to be carrying **this**
+Three further limits. The autopilot runs on **stock settings**. An earlier
+version of this test had to switch off one of its estimator settings to stay
+stable, because of that missing speed report; that is gone, and removing it made
+the clean run *better* — 4 cm instead of 9 cm. What remains is on our side of
+the wire: because the GPS software reports no speed at all, our rig works one
+out by comparing consecutive positions. A real receiver measures speed directly
+from the Doppler shift of the satellite signals and would not need that. It is a
+crutch for our test setup, not something an attacker chooses or benefits from.
+The correction link also has to be carrying **this**
 format: plenty of RTK radios carry a different, proprietary one, and the bug is
 not reachable through those. And only a multirotor was tested, only holding
 position and flying a short leg. Tractors, boats, fixed-wing aircraft and

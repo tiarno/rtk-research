@@ -20,7 +20,10 @@ RNX="${RNX:-/tmp/rnx2rtkp}"
 DATA="$RTKLIB/test/data/rinex"
 
 echo "=== Part 1: rectype length -> sta.pos (via the real decoder) ==="
-for n in 208 212 215 216 220 223 230 255; do
+# 209-213 individually: each additional byte multiplies the truncation quantum
+# by 256, so the usable settings are a handful of rungs and not a continuum.
+# 211 is the one that matters -- see "the dial has four rungs" in README.md.
+for n in 208 209 210 211 212 213 214 215 223 255; do
     "$PY" gen_rtcm.py /tmp/sweep.bin --field rectype --len "$n" >/dev/null
     printf 'n1=%-4s ' "$n"
     ./harness /tmp/sweep.bin 2>&1 | grep 'sta.pos' | tail -1

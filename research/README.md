@@ -130,7 +130,7 @@ stream — which is the normal RTK configuration.
 `dgps` is seeded with a `0x41` sentinel because `init_rtcm()` leaves it NULL,
 which would hide the corruption.
 
-### The length byte is a magnitude dial
+### The length byte selects the magnitude
 
 The write is a contiguous prefix starting at `rectype+31`, so the declared
 length selects how many low-order bytes of `pos[0]` (then `pos[1]`, then
@@ -145,10 +145,42 @@ n1=223      sta.pos =       0.0000        0.0000 3857878.9240
 n1=255      sta.pos =       0.0000        0.0000       0.0000
 ```
 
-The exact magnitude for a given `n1` depends on the base station's actual
-coordinates, since it is the float mantissa being truncated. An attacker who
-does not know them can sweep `n1` upward from 209 until the effect is the size
-they want.
+### The dial has four rungs, and 211 is the one that generalises
+
+Calling it a dial oversells it. Each additional zeroed byte multiplies the
+truncation quantum by 256, so between "no effect" and "no solution" there are
+only a handful of settings. Measured through the real decoder, base ECEF
+X = -2694685.4730:
+
+| `n1` | bytes of `pos[0]` zeroed | truncation quantum | resulting `pos[0]` | error |
+|---|---|---|---|---|
+| 208 | 1 | 0.12 µm | -2694685.4730 | — |
+| 209 | 2 | 31 µm | -2694685.4730 | — |
+| 210 | 3 | 7.8 mm | -2694685.4688 | 0.004 m |
+| **211** | **4** | **2 m** | **-2694684.0000** | **1.473 m** |
+| 212 | 5 | 512 m | -2694656.0000 | 29.47 m |
+| 213 | 6 | 131 km | -2621440.0000 | 73.2 km |
+| 214 | 7 | 33.6 Mm | -131072.0000 | 2564 km |
+
+The attacker chooses the *scale*, not the value. Within a rung the error is
+whatever the truncated low bits of the true coordinate happen to be —
+effectively uniform in `[0, quantum)` and not controllable, since the write is
+always zeros and truncation is always toward zero.
+
+**That makes `n1=211` the setting worth quoting.** Zeroing exactly four bytes
+quantises ECEF X to `2^32 × ulp(X)`, which for any Earth-surface coordinate
+(|X| ≤ 6378 km) is between 0.5 m and 4 m — for both bases measured here,
+exactly 2 m. So the induced error is bounded by one quantum: **always large
+enough to matter to an RTK user, never large enough to lose the solution, for
+any base station anywhere.** No knowledge of the base coordinates is required.
+The error for the two bases tested is 1.47 m and 0.43 m.
+
+`n1=212` is the opposite: a 512 m quantum, so the outcome is a coin toss. It
+gives 2.435 m against the end-to-end base — which is why it is the length used
+throughout the live demo — and 29.5 m against this one, where it would simply
+be rejected. **The 2.4 m headline is that die landing well, not a magnitude
+the attacker selected.** Both facts belong in any presentation of this: 211 is
+the reliable attack, 212 is the dramatic one, and they are not the same claim.
 
 ### The same dial on the binaries people actually run
 
