@@ -88,12 +88,13 @@ controller reads them exactly as it would from any receiver. It has no idea
 anything unusual is upstream — it just sees a healthy, high-confidence fix.
 
 **6. The drone flies to the wrong place.**
-Given a position error of this size, an autopilot:
+An autopilot receiving that position:
 
-- while **hovering**, physically flew **1.9 metres sideways** — correcting a
-  drift that never happened
-- when told to **fly to a specific coordinate**, went to a spot **1.9 metres
-  away from it, and reported that it had arrived**
+- while **hovering**, physically moved about **two metres sideways** —
+  correcting a drift that never happened
+- when told to **fly to a specific coordinate**, stopped roughly **two metres
+  away from it, and reported that it had arrived** (1.9 m handed the error
+  directly; 1.8 m with the drone computing it from the message itself)
 
 A machine that is confidently wrong is more dangerous than one that knows it is
 broken. Two metres is several crop rows, half a road lane, or the difference
@@ -157,28 +158,41 @@ goes into the real GPS software, over a real serial link, and a wrong position
 comes out the far side as standard GPS sentences that a flight controller
 accepts and locks onto.
 
-**Step 6 is the one to be careful about.** The 1.9 metre figures above come
-from a separate test, in which the flight simulator is *given* a position error
-of that size rather than receiving it from the GPS software.
+**Step 6 has now been measured twice, two different ways, and the answers
+agree.** The first way hands the flight simulator a position error of the
+measured size directly. The second closes the whole chain: the simulated
+aircraft's own position is turned into satellite measurements, fed to the GPS
+software, and the answer handed back to the aircraft as its only GPS — so the
+drone flies on a position it worked out for itself from the attacker's message,
+with nothing fed in by hand.
 
-The two halves have since been joined. The simulated aircraft's own position is
-turned into satellite measurements, fed to the GPS software, and the answer
-handed back to the aircraft as its only GPS — so the aircraft flies on a
-position it computed from the attacker's message. In that setup a drone armed,
-took off, flew and landed while its GPS was lying to it by the injected two
-metres, and the lie arrived only as one extra message on the correction link.
-Nothing was fed in by hand.
+To know that the second one means anything, we flew it twice: once with the
+attack, once with the attacker switched off and everything else identical.
 
-**But how far that drone ended up from where it should be is not yet a usable
-number.** Our test rig has a lag in it: the aircraft's position takes too long
-to travel around the loop and come back as GPS. That lag on its own makes the
-aircraft wobble, and the wobble grows until it wanders off — attack or no
-attack. Any distance measured that way is measuring our rig, not the attack. So
-the 1.9 metre figures stand, and the closed-loop ones do not exist yet.
+| | attacker off | attacker on |
+|---|---|---|
+| how far the GPS was lying | 1 cm | **2.1 m** |
+| missed the target coordinate by | **9 cm** | **1.8 m** |
 
-Two further limits. The correction link has to be carrying **this** format —
-plenty of RTK radios carry a different, proprietary one, and the bug is not
-reachable through those. And only a multirotor was tested, only holding
+Clean, the drone parks within a hand's width of where it was told to go. Under
+attack, it stops nearly two metres away and reports that it has arrived. That
+second column is close to the 1.9 metres the separate test produced, which is
+the reassuring part: two quite different setups, the same answer.
+
+**Why that "attacker off" column matters more than it looks.** The first time
+this chain ran, the drone wandered 113 metres and we nearly had a spectacular
+result. It was our own rig: the GPS software never reports how fast it is
+moving, and the autopilot, told it was standing still while it could feel
+itself moving, fought its own navigation until it lost the argument. With the
+attacker switched off it wandered just as badly. Any test where you cannot
+switch the attack off is not a test.
+
+Three further limits. To keep the closed-loop drone stable we had to switch off
+one setting the autopilot normally uses, because of that missing speed report —
+a workaround for our rig, not something an attacker gets to choose, and a real
+receiver would not need it. The correction link also has to be carrying **this**
+format: plenty of RTK radios carry a different, proprietary one, and the bug is
+not reachable through those. And only a multirotor was tested, only holding
 position and flying a short leg. Tractors, boats, fixed-wing aircraft and
 survey workflows are untested, as is any behaviour when the error is ramped in
 slowly rather than applied at once.

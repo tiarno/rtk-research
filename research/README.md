@@ -488,9 +488,82 @@ earlier caveat that "still reports FIXED" was only demonstrated on RINEX
 input: on synthetic observables the solution holds a fixed ambiguity
 throughout, clean and attacked alike.
 
-What remains for a single packet-to-propeller chain is to drive the rover
-position from the simulated aircraft in real time instead of a fixed
-coordinate, and close the loop back through the NMEA bridge.
+### The loop closed: packet to propeller in one run
+
+`loop_demo.sh` joins the halves. The aircraft's own position becomes the
+observables RTKLIB solves, and RTKLIB's solution is the aircraft's only GPS:
+
+```
+SITL truth --> gnss_sim --> [relay splices the malicious 1033]
+                                   |
+                             RTKLIB (rtksvr)
+                                   |
+                                 NMEA
+                                   |
+                            SITL's GPS --> vehicle moves
+```
+
+Nothing is fed in by hand. The offset reaches the flight controller only as one
+extra well-formed message on the correction link, spliced on-path into a live
+TCP stream by `inject_relay.py` after every 1005.
+
+A control run with injection disabled (`./loop_demo.sh 0`) is what makes the
+attacked run readable, and it is not optional — see the harness defects below.
+
+| | control, 0 injected | attacked, 691 injected |
+|---|---|---|
+| GPS vs. truth, before | 0.00 m | 0.01 m |
+| GPS vs. truth, after | 0.00 m | **2.08 m** |
+| displacement while holding in GUIDED | — | **2.16 m** |
+| commanded-waypoint miss | **0.09 m** | **1.81 m** |
+| distance flown on the leg | 0.10 m of 0.18 m | 29.96 m of 30.99 m |
+
+Clean, the aircraft flies to within **9 cm** of the coordinate it was given.
+Attacked, it stops **1.81 m** away and reports that it has arrived, having
+flown essentially the whole leg.
+
+Those figures agree with the separately measured open-loop ones — 1.90 m
+displacement, 1.87 m miss, 29.96 m of a 31.06 m leg — which is the point of
+running both. Two independent paths to the same numbers: one that hands the
+autopilot a position error directly, one that makes it compute that error
+itself from a corrupted correction message.
+
+The magnitudes match; the *direction* does not straightforwardly. The
+open-loop demo moved the aircraft opposite the injected offset, while here the
+displacement carries the same sign as the GPS error the parser reports. That is
+not resolved, and no claim about the sign should rest on this run.
+
+**Two harness defects had to be fixed first, and both produced results that
+looked like attack effects.**
+
+*Altitude fed back as truth.* `mav_pos.py` initially read
+`GLOBAL_POSITION_INT` altitude — the vehicle's own estimate — and fed it back
+as the rover's position, so the estimate defined the observables that then
+confirmed it. Solution height ran from 75.8 m to −143 m in 40 s. Truth
+altitude comes from `SIM_STATE` now, which belongs to no stream group and has
+to be requested by message id.
+
+*A GPS insisting the aircraft was stationary.* RTKLIB's NMEA RMC reports a
+speed of 0.00 regardless of how fast the rover moves — measured against a
+rover fed a known 1 m/s ramp, and `prcopt.dynamics` does not change it, so the
+solution simply carries no velocity to format. `GPS.Spd` was 0.000 in all 496
+dataflash records of a flight covering 124 m. ArduPilot's EKF3 fuses GPS
+velocity by default, and the result was an oscillation that doubled in
+amplitude every ~9 s until the aircraft wandered 113 m off. It looked like a
+dramatic attack effect. It was not: **a control run with no injection at all
+drifted 25.9 m and missed its waypoint by 45.4 m.** `EK3_SRC1_VELXY 0` in the
+demo's parameters stops the EKF using GPS velocity, after which the control run
+lands within 9 cm.
+
+Worth being explicit that this last one is a deviation from a stock
+configuration, made necessary by RTKLIB's NMEA output rather than by anything
+the attack does. A real receiver reports Doppler velocity, so a real rover
+would not need it.
+
+Loop delay was measured and exonerated on the way: `loop_latency.sh` puts a
+square wave through the whole chain with no vehicle in it and times the edges,
+giving **130 ms**, consistent to ±10 ms, which is faster than a real GPS and
+well inside what the EKF expects.
 
 ### Why the dataset is time-shifted
 
@@ -538,6 +611,10 @@ with a different toolchain (gcc/glibc vs. Apple clang).
 | `sitl_demo.sh` | runs the flight and the analysis together |
 | `nmea_bridge.py` | feeds RTKLIB's NMEA solution to an autopilot as a GPS |
 | `gnss_sim.c` | synthesises base+rover observables for two arbitrary positions |
+| `inject_relay.py` | on-path relay: splices the 1033 into a live stream, after every 1005 |
+| `mav_pos.py` | streams the simulated vehicle's ground truth to `gnss_sim` |
+| `loop_demo.sh` | the closed loop — packet to propeller in one run (`0` for the control) |
+| `loop_latency.py` / `.sh` | measures the loop delay with no vehicle in it |
 
 ```sh
 git clone -b rtklib_2.4.3 https://github.com/tomojitakasu/RTKLIB
@@ -612,19 +689,25 @@ than implying a fix is coming.
 
 Read these before quoting anything above.
 
-- **The vehicle result is a simulation, and the offset is injected, not
-  decoded.** ArduPilot SITL is fed the measured offset through its GPS glitch
-  parameters; it is not running RTKLIB and never sees the malicious RTCM3.
-  What that demonstrates is the consequence of a position offset of this size
-  on a real autopilot's control loop — the open question the RTKLIB work could
-  not answer. No real aircraft was involved.
-- **Precisely what is and is not one continuous chain.** Malicious message →
-  RTKLIB → corrupted position → NMEA → an autopilot holding a fix on it *is*
-  measured end to end, over both file and serial transports. The vehicle's
-  physical response is measured separately. Joining them needs RTKLIB to
-  receive rover observations from wherever the aircraft actually is, which
-  means either synthesising those observables or using a real receiver under
-  a real sky. Neither is done.
+- **The vehicle results are simulations.** No real aircraft or GPS hardware was
+  involved anywhere in this work. `sitl_demo.sh` feeds ArduPilot the measured
+  offset through its GPS glitch parameters, so there the autopilot never sees
+  the malicious RTCM3; that isolates the consequence of an offset of this size
+  on a real control loop. `loop_demo.sh` closes the chain and does have the
+  autopilot compute the error itself from the injected message.
+- **The closed loop needs `EK3_SRC1_VELXY 0`**, because RTKLIB's NMEA reports
+  zero velocity and ArduPilot's EKF3 otherwise fuses it. That is a deviation
+  from a stock configuration forced by the harness, not by the attack, and a
+  real receiver reporting Doppler velocity would not need it. Whether the same
+  displacement appears on a stock parameter set with a velocity-reporting
+  receiver is untested.
+- **The closed-loop displacement direction is unresolved.** Magnitudes agree
+  with the open-loop run, but the sign of the physical displacement does not
+  line up cleanly between the two. Quote the magnitudes, not the direction.
+- **Read the control run before quoting any closed-loop number.** Two harness
+  defects each produced large, attack-shaped displacements with no attack
+  present. `./loop_demo.sh 0` is the check, and it should land within
+  centimetres.
 - Only a multirotor holding position and flying a short GUIDED leg was tested.
   Fixed-wing, autosteer, marine autopilots and survey workflows are untested,
   as is any behaviour under a gradually ramped offset rather than a step.
