@@ -510,25 +510,29 @@ TCP stream by `inject_relay.py` after every 1005.
 A control run with injection disabled (`./loop_demo.sh 0`) is what makes the
 attacked run readable, and it is not optional — see the harness defects below.
 
+Both runs below use a **stock ArduPilot parameter set** — the only parameters
+the demo sets are the ones that wire the harness up (frame class, GPS type,
+serial protocol, stream rates). No tuning or estimator parameter is changed.
+
 | | control, 0 injected | attacked, 520 injected |
 |---|---|---|
-| GPS vs. truth, before | 0.00 m | 0.00 m |
-| GPS vs. truth, after | 0.00 m | **1.91 m** |
-| displacement while holding in GUIDED | — | **1.89 m**, opposite the offset |
-| commanded-waypoint miss | **0.09 m** | **1.81 m** |
-| distance flown on the leg | 30.09 m of 30.02 m | 29.64 m of 30.66 m |
+| GPS vs. truth, before | 0.00 m | 0.01 m |
+| GPS vs. truth, after | 0.00 m | **1.92 m** |
+| displacement while holding in GUIDED | — | **1.86 m**, opposite the offset |
+| commanded-waypoint miss | **0.04 m** | **1.86 m** |
+| distance flown on the leg | 29.99 m of 29.95 m | 29.38 m of 30.40 m |
 
-Clean, the aircraft flies to within **9 cm** of the coordinate it was given.
-Attacked, it stops **1.81 m** away and reports that it has arrived, having
+Clean, the aircraft flies to within **4 cm** of the coordinate it was given.
+Attacked, it stops **1.86 m** away and reports that it has arrived, having
 flown essentially the whole leg.
 
 Those figures agree with the separately measured open-loop ones, and not only
-in magnitude — component by component, to within 7 cm:
+in magnitude — component by component, to within 5 cm:
 
 | | injected offset | aircraft moved | waypoint miss |
 |---|---|---|---|
 | open loop (`sitl_demo.sh`) | N +1.07  E −1.58 | N −1.07  E +1.57 | N −1.06  E +1.54 |
-| closed loop (`loop_demo.sh`) | N +1.05  E −1.57 | N −1.01  E +1.59 | N −1.00  E +1.51 |
+| closed loop (`loop_demo.sh`) | N +1.06  E −1.58 | N −1.05  E +1.54 | N −1.03  E +1.55 |
 
 Two independent paths to the same vector: one that hands the autopilot a
 position error directly, one that makes it compute that error itself from a
@@ -554,14 +558,35 @@ dataflash records of a flight covering 124 m. ArduPilot's EKF3 fuses GPS
 velocity by default, and the result was an oscillation that doubled in
 amplitude every ~9 s until the aircraft wandered 113 m off. It looked like a
 dramatic attack effect. It was not: **a control run with no injection at all
-drifted 25.9 m and missed its waypoint by 45.4 m.** `EK3_SRC1_VELXY 0` in the
-demo's parameters stops the EKF using GPS velocity, after which the control run
-lands within 9 cm.
+drifted 25.9 m and missed its waypoint by 45.4 m.**
 
-Worth being explicit that this last one is a deviation from a stock
-configuration, made necessary by RTKLIB's NMEA output rather than by anything
-the attack does. A real receiver reports Doppler velocity, so a real rover
-would not need it.
+The first fix was `EK3_SRC1_VELXY 0`, which stops the EKF using GPS velocity at
+all. That worked, but it is a deviation from a stock configuration forced by
+the harness rather than by the attack, and a demo is weaker for every parameter
+it has to explain away. **It is no longer used.** Instead the harness supplies
+the velocity RTKLIB does not: `NMEA_VEL=1` makes `e2e_harness.c` format the
+NMEA itself, deriving the velocity by differencing successive solutions at
+5 Hz. Be plain that **differencing stands in for the Doppler velocity a real
+receiver measures** — it is noisier, and unlike Doppler it responds to a step
+in the position solution, so a median of three samples rejects the one-epoch
+~12 m/s spike the moment the base coordinate jumps.
+
+One further thing had to change with it. RTKLIB's `outnmea_rmc()` reports the
+*previous* course whenever speed is below 1 m/s (`static double dirp`, which
+starts at 0.0), so a correct speed still arrives with a frozen bearing.
+Measured with no vehicle in the loop: fed 0.5 m/s due east, RTKLIB's RMC
+reports 0.499 m/s on a course of 0.0° — a 90° error. ArduPilot rebuilds
+velocity as speed × course, and a hovering multirotor lives entirely in the
+sub-1 m/s band, so this is a *consistent* error the estimator integrates rather
+than noise it averages away. With it, the aircraft oscillated ±3 m while
+holding; the waypoint leg, flown above 1 m/s where the course is live, was
+unaffected. `own_rmc()` formats the sentence with the course computed at every
+speed — same fields, same talker id, and GGA/GSA/GSV still RTKLIB's own.
+
+`MODE=speed ./loop_latency.sh` checks this without a vehicle: fed 0.5 m/s on a
+bearing of 90°, the RMC now reports 0.499 m/s and 90.0°; fed 0.3 m/s on 225°,
+0.298 m/s and 225.1°. The control run then lands within **4 cm** on stock
+parameters, which is better than the 9 cm the workaround achieved.
 
 *An attack that began before the aircraft did.* The relay armed itself on a
 timer counted from the moment RTKLIB connected to it, which put it downstream
@@ -633,7 +658,7 @@ with a different toolchain (gcc/glibc vs. Apple clang).
 | `inject_relay.py` | on-path relay: splices the 1033 into a live stream, after every 1005 |
 | `mav_pos.py` | streams the simulated vehicle's ground truth to `gnss_sim` |
 | `loop_demo.sh` | the closed loop — packet to propeller in one run (`0` for the control) |
-| `loop_latency.py` / `.sh` | measures the loop delay with no vehicle in it |
+| `loop_latency.py` / `.sh` | loop delay with no vehicle in it; `MODE=speed` checks the reported ground speed and course against a fed ramp |
 | `sign_check.py` | truth, GPS and EKF traces in one frame — which way the aircraft moved, and why |
 
 ```sh
@@ -715,12 +740,13 @@ Read these before quoting anything above.
   the malicious RTCM3; that isolates the consequence of an offset of this size
   on a real control loop. `loop_demo.sh` closes the chain and does have the
   autopilot compute the error itself from the injected message.
-- **The closed loop needs `EK3_SRC1_VELXY 0`**, because RTKLIB's NMEA reports
-  zero velocity and ArduPilot's EKF3 otherwise fuses it. That is a deviation
-  from a stock configuration forced by the harness, not by the attack, and a
-  real receiver reporting Doppler velocity would not need it. Whether the same
-  displacement appears on a stock parameter set with a velocity-reporting
-  receiver is untested.
+- **The closed loop supplies its own GPS velocity**, because RTKLIB's rtksvr
+  path reports none and ArduPilot's EKF3 fuses velocity by default. It is
+  derived by differencing successive position solutions, which stands in for
+  the Doppler velocity a real receiver measures: noisier, and unlike Doppler it
+  responds to a step in the position solution. The estimator parameters are now
+  stock (`EK3_SRC1_VELXY 0` is gone), but the *receiver* is doing something a
+  real one would not have to.
 - **Read the control run before quoting any closed-loop number.** Three harness
   defects each produced large, attack-shaped displacements with no attack
   present. `./loop_demo.sh 0` is the check, and it should land within

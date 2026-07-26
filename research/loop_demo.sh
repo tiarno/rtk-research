@@ -58,11 +58,39 @@ cleanup() {
 }
 cleanup; sleep 1
 
+# Every stage is a server its downstream neighbour must reach, and a stage that
+# fails to bind takes the whole chain down silently: gnss_sim losing :5901/:5902
+# to a leftover process produced no observables, so RTKLIB produced no solution,
+# so SITL got no GPS and sat there with EKF flags=0x0400 until the flight driver
+# gave up -- four minutes to report a port collision. Check each one instead.
+require_port() {
+    local port="$1" what="$2" i
+    for i in $(seq 1 40); do
+        if ss -ltn 2>/dev/null | grep -qE "[:.]$port\b"; then return 0; fi
+        sleep 0.25
+    done
+    echo "FAILED: $what never started listening on :$port" >&2
+    echo "  check $T/${3:-sim.log}; something else may be holding the port" >&2
+    cleanup
+    exit 1
+}
+
 echo "### building ###"
-gcc -I "$RTKLIB/src" -O2 -o "$T/gnss_sim" "$HERE/gnss_sim.c" \
-    "$RTKLIB"/src/*.c "$RTKLIB"/src/rcv/*.c -lm -lpthread 2>&1 | grep -Ei '\berror\b'
-gcc -I "$RTKLIB/src" -O2 -U_FORTIFY_SOURCE -o "$T/e2e_loop" "$HERE/e2e_harness.c" \
-    "$RTKLIB"/src/*.c "$RTKLIB"/src/rcv/*.c -lm -lpthread 2>&1 | grep -Ei '\berror\b'
+# Delete first, and test the compiler's exit status rather than the file's
+# existence. Otherwise a failed build silently leaves the previous binary in
+# place and the run measures code that is no longer on disk -- which happened,
+# and cost a full flight plus the wrong conclusion from it.
+# -DSVR_REUSEADDR: RTKLIB only sets SO_REUSEADDR on a TCP server when built
+# with this, so without it every run leaves :5901/:5902/:5903 unbindable for
+# the TIME_WAIT window and the next run dies at startup. A demo you cannot
+# immediately retry is not a demo.
+rm -f "$T/gnss_sim" "$T/e2e_loop"
+gcc -I "$RTKLIB/src" -O2 -DSVR_REUSEADDR -o "$T/gnss_sim" "$HERE/gnss_sim.c" \
+    "$RTKLIB"/src/*.c "$RTKLIB"/src/rcv/*.c -lm -lpthread || {
+        echo "build failed: gnss_sim.c"; exit 1; }
+gcc -I "$RTKLIB/src" -O2 -DSVR_REUSEADDR -U_FORTIFY_SOURCE -o "$T/e2e_loop" "$HERE/e2e_harness.c" \
+    "$RTKLIB"/src/*.c "$RTKLIB"/src/rcv/*.c -lm -lpthread || {
+        echo "build failed: e2e_harness.c"; exit 1; }
 [ -x "$T/gnss_sim" ] && [ -x "$T/e2e_loop" ] || { echo "build failed"; exit 1; }
 
 cat > "$T/loop.parm" <<'EOF'
@@ -80,7 +108,6 @@ SR1_POSITION 10
 SR1_EXTRA1 10
 SR1_EXTRA3 10
 SR1_EXT_STAT 10
-EK3_SRC1_VELXY 0
 EOF
 
 AP_DEF="$HOME/ardupilot/Tools/autotest/default_params/copter.parm"
@@ -97,9 +124,10 @@ holder=$!
 echo "### 1. observable synthesiser (binds :5901 base, :5902 rover) ###"
 "$T/gnss_sim" "$RTKLIB/test/data/rinex/07590920.05n" "$BASE_ECEF" \
     --live :5901 :5902 5 < pos.fifo > "$T/sim.log" 2>&1 &
-# Generous settles: each stage must be listening before the next connects,
-# and a client that gives up takes the rest of the chain down with it.
-sleep 8
+# Each stage must be listening before the next connects, and a client that
+# gives up takes the rest of the chain down with it.
+require_port 5901 "gnss_sim (base)" sim.log
+require_port 5902 "gnss_sim (rover)" sim.log
 
 echo "### 2. on-path relay :5911 -> :5901 (injects when the aircraft says so) ###"
 # Not a timer. Counting seconds from the consumer's connect couples the attack
@@ -110,19 +138,19 @@ echo "### 2. on-path relay :5911 -> :5901 (injects when the aircraft says so) ##
 # holding, and the relay waits for it.
 python3 "$HERE/inject_relay.py" --listen 5911 --upstream 127.0.0.1:5901 \
     --len "$LEN" --trigger "$TRIG" > "$T/relay.log" 2>&1 &
-sleep 4
+require_port 5911 "inject_relay" relay.log
 
-# RTKLIB emits RMC with a speed of 0.00 no matter how fast the rover is moving
-# -- measured at a known 1 m/s, and prcopt.dynamics does NOT change it, so the
-# solution carries no velocity to format. An autopilot fusing that is being told
-# it is stationary mid-flight, which destabilises it with no attack involved, so
-# EK3_SRC1_VELXY above stops the EKF using GPS velocity at all. DYNAMICS is kept
-# as a knob because the harness prints the solution speed and it is the thing to
-# re-check if this is ever fixed upstream.
+# NMEA_VEL: the harness formats the NMEA itself and fills in a ground speed by
+# differencing successive solutions. RTKLIB's server leaves the solution
+# velocity at zero -- measured at a known 1 m/s, with prcopt.dynamics on and
+# off -- so its RMC says 0.00 knots however fast the rover moves, and an
+# autopilot fusing that is being told it is stationary mid-flight. That used to
+# need EK3_SRC1_VELXY 0 to stay stable, which is a deviation from a stock
+# configuration; with a real speed in the RMC the parameter is gone.
 echo "### 3. RTKLIB: rover :5902, base via relay :5911, NMEA out :5903 ###"
-DYNAMICS=1 NMEA_TCP=:5903 "$T/e2e_loop" 127.0.0.1:5902 127.0.0.1:5911 "$RUN" 1 tcp \
+NMEA_VEL=1 NMEA_TCP=:5903 "$T/e2e_loop" 127.0.0.1:5902 127.0.0.1:5911 "$RUN" 1 tcp \
     > "$T/rtklib.log" 2>&1 &
-sleep 6
+require_port 5903 "RTKLIB NMEA output" rtklib.log
 
 echo "### 4. SITL, taking its GPS from RTKLIB ###"
 # Two MAVLink endpoints, not one. SERIAL0 takes a single client at a time, so

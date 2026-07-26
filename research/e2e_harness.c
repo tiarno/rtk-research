@@ -21,6 +21,11 @@
  * be delivered over a UART -- the transport a UHF/VHF base-rover radio link
  * uses -- rather than over a file or socket. Note RTKLIB prefixes the port
  * with /dev/, so a pty under /tmp is reached as "../tmp/ttyX".
+ *
+ * NMEA_VEL=1 makes the harness format the NMEA itself, with a ground speed
+ * derived by differencing successive solutions, instead of letting RTKLIB's
+ * solution stream do it. See derive_vel() for why that is necessary and what
+ * it costs.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +38,156 @@ void settspan(gtime_t ts, gtime_t te) { (void)ts; (void)te; }
 void settime(gtime_t time) { (void)time; }
 
 static rtksvr_t svr;
+static stream_t nmeastr;
+
+/* Both live in solution.c, not rtklib.h, so they are not visible here. Same
+ * values, so the sentence own_rmc() writes stays identical to RTKLIB's. */
+#define NMEA_TID "GN"           /* talker id: $GNRMC */
+#define KNOT2M   0.514444444    /* m/s per knot */
+
+/*
+ * Ground speed for the RMC sentence, by differencing successive solutions.
+ * =======================================================================
+ *
+ * RTKLIB's rtksvr path leaves the solution velocity at zero -- measured, with
+ * prcopt.dynamics both on and off, against a rover fed a known 1 m/s ramp --
+ * so outnmea_rmc(), which derives speed and course from sol->rr[3..5], emits
+ * 0.00 knots however fast the rover is moving. An autopilot fusing that is
+ * being told it is stationary mid-flight. ArduPilot's EKF3 fuses GPS velocity
+ * by default, and the result was an oscillation that doubled in amplitude
+ * every ~9 s with no attack present at all. The demo worked around it with
+ * EK3_SRC1_VELXY 0, which is a deviation from a stock configuration that an
+ * audience can reasonably ask about.
+ *
+ * So derive the velocity here and hand outnmea_rmc() a solution it can format
+ * correctly. Nothing else about the sentence changes.
+ *
+ * Be plain about what this is: **differencing stands in for the Doppler
+ * velocity a real receiver measures.** A real receiver derives velocity from
+ * the carrier Doppler shift, independently of its position solution. This is
+ * position-derived, which differs in two ways that matter:
+ *
+ *  - it is noisier, by roughly (position noise)/dt;
+ *  - it responds to a *step* in the position solution, which Doppler does not.
+ *
+ * The second one is this harness's problem specifically: when the malicious
+ * 1033 lands, the base coordinate moves and the solution jumps ~2.4 m in a
+ * single epoch. Differenced, that is a ~12 m/s velocity spike for one sample,
+ * reporting motion that never happened -- an artifact of the method, not of
+ * the attack, and not something a Doppler receiver would emit. A median of the
+ * last three samples removes an isolated one-epoch outlier exactly, while
+ * passing any real acceleration the vehicle can produce at 5 Hz.
+ */
+#define VELWIN 3
+
+static double med3(double a, double b, double c)
+{
+    if (a > b) { double t = a; a = b; b = t; }
+    if (b > c) { double t = b; b = c; c = t; }
+    if (a > b) { double t = a; a = b; b = t; }
+    return b;
+}
+
+static void derive_vel(sol_t *sol)
+{
+    static gtime_t prev_time = {0};
+    static double prev_rr[3] = {0};
+    static double hist[VELWIN][3];
+    static int nhist = 0, have_prev = 0;
+    double v[3] = {0};
+    double dt;
+    int i, j;
+
+    dt = have_prev ? timediff(sol->time, prev_time) : 0.0;
+    /* A gap means the previous position is too old to difference against:
+     * report no velocity rather than a fabricated one. */
+    if (have_prev && dt > 0.01 && dt < 2.0) {
+        for (j = 0; j < 3; j++) v[j] = (sol->rr[j] - prev_rr[j]) / dt;
+    } else {
+        nhist = 0;
+    }
+    prev_time = sol->time;
+    for (j = 0; j < 3; j++) prev_rr[j] = sol->rr[j];
+    have_prev = 1;
+
+    for (i = VELWIN - 1; i > 0; i--)
+        for (j = 0; j < 3; j++) hist[i][j] = hist[i - 1][j];
+    for (j = 0; j < 3; j++) hist[0][j] = v[j];
+    if (nhist < VELWIN) nhist++;
+
+    /* Until the window is full there is nothing to reject a spike with, so
+     * emit zero rather than a value that might be one. */
+    for (j = 0; j < 3; j++)
+        sol->rr[3 + j] = nhist < VELWIN ? 0.0
+                       : med3(hist[0][j], hist[1][j], hist[2][j]);
+}
+
+/*
+ * RMC, formatted here rather than by RTKLIB's outnmea_rmc().
+ * =========================================================
+ *
+ * Everything about outnmea_rmc() is reusable except one line:
+ *
+ *     if (vel>=1.0) { dir=...; dirp=dir; } else dir=dirp;
+ *
+ * Below 1 m/s it reports the *previous* course, and `dirp` starts at 0.0. A
+ * consumer that rebuilds velocity as speed x course -- which is what
+ * ArduPilot's NMEA driver does -- then gets a vector with the right length
+ * pointing the wrong way. Measured: fed 0.5 m/s due east, the RMC reports
+ * 0.499 m/s on a course of 0.0 degrees, a 90 degree error.
+ *
+ * That is worse than noise, because it is a *consistent* error the EKF
+ * integrates rather than averages away, and a hovering multirotor lives
+ * entirely in the sub-1 m/s band. With RTKLIB's RMC and a derived speed the
+ * aircraft oscillated +-3 m while holding; the waypoint leg, flown above
+ * 1 m/s where the course is live, was unaffected.
+ *
+ * So: same sentence, same field layout, course computed at every speed.
+ */
+static int own_rmc(uint8_t *buff, const sol_t *sol)
+{
+    static double dirp = 0.0;
+    gtime_t time;
+    double ep[6], pos[3], enuv[3], dms1[3], dms2[3], vel, dir, amag = 0.0;
+    char *p = (char *)buff, *q, sum;
+    const char *emag = "E", *mode = "A", *status = "V";
+
+    if (sol->stat <= SOLQ_NONE) return 0;
+
+    time = gpst2utc(sol->time);
+    if (time.sec >= 0.995) { time.time++; time.sec = 0.0; }
+    time2epoch(time, ep);
+    ecef2pos(sol->rr, pos);
+    ecef2enu(pos, sol->rr + 3, enuv);
+    /* Ground speed is horizontal: enuv is [E,N,U] and the vertical rate has
+     * no business in RMC. RTKLIB uses norm(enuv,3) here, which folds climb
+     * rate into the reported ground speed. */
+    vel = norm(enuv, 2);
+    /* A deadband, not a latch: below it the vector is too short for its
+     * direction to mean anything, and holding the last bearing on a ~0 m/s
+     * speed contributes ~0 velocity either way. */
+    if (vel >= 0.05) {
+        dir = atan2(enuv[0], enuv[1]) * R2D;
+        if (dir < 0.0) dir += 360.0;
+        dirp = dir;
+    } else {
+        dir = dirp;
+    }
+    if      (sol->stat == SOLQ_DGPS  || sol->stat == SOLQ_SBAS) mode = "D";
+    else if (sol->stat == SOLQ_FLOAT || sol->stat == SOLQ_FIX)  mode = "R";
+    else if (sol->stat == SOLQ_PPP)                             mode = "P";
+    deg2dms(fabs(pos[0]) * R2D, dms1, 7);
+    deg2dms(fabs(pos[1]) * R2D, dms2, 7);
+    p += sprintf(p, "$%sRMC,%02.0f%02.0f%05.2f,A,%02.0f%010.7f,%s,%03.0f%010.7f,"
+                 "%s,%4.2f,%4.2f,%02.0f%02.0f%02d,%.1f,%s,%s,%s",
+                 NMEA_TID, ep[3], ep[4], ep[5], dms1[0], dms1[1] + dms1[2] / 60.0,
+                 pos[0] >= 0 ? "N" : "S", dms2[0], dms2[1] + dms2[2] / 60.0,
+                 pos[1] >= 0 ? "E" : "W", vel / KNOT2M, dir, ep[2], ep[1],
+                 (int)ep[0] % 100, amag, emag, mode, status);
+    for (q = (char *)buff + 1, sum = 0; *q; q++) sum ^= *q;
+    p += sprintf(p, "*%02X\r\n", sum);
+    return p - (char *)buff;
+}
 
 int main(int argc, char **argv)
 {
@@ -49,6 +204,13 @@ int main(int argc, char **argv)
     int i, secs = 20, speed = 400, nout = 0, lastq = -1, serial = 0;
     double rb_prev[3] = {0};
     char rovpath[1100], basepath[1100];
+    /* NMEA_VEL: the harness formats the sentences, so it can supply the
+     * solution velocity RTKLIB's server never populates. */
+    int own_nmea = getenv("NMEA_VEL") != NULL;
+    const char *nmea_path = NULL;
+    static ssat_t ssat[MAXSAT];
+    uint8_t nbuf[4096];
+    int nsent = 0;
 
     if (argc < 3) {
         fprintf(stderr,
@@ -82,16 +244,15 @@ int main(int argc, char **argv)
     prcopt.rovpos  = POSOPT_SINGLE;
 
     /*
-     * DYNAMICS=1 adds velocity states to the filter, which is what makes the
-     * NMEA RMC sentence carry a real speed and course: outnmea_rmc() derives
-     * both from the solution velocity, and with dynamics off that velocity is
-     * identically zero. A receiver reporting 0 knots while the vehicle flies
-     * is not a harmless cosmetic defect -- ArduPilot's EKF3 fuses GPS velocity
-     * by default, so it destabilises the aircraft as soon as it moves, which
-     * is exactly what happened in the closed loop.
+     * DYNAMICS=1 adds velocity states to the filter. It was tried as the fix
+     * for the zero-velocity RMC and does NOT work: the solution velocity is
+     * identically zero with it on and off, measured against a rover fed a
+     * known 1 m/s ramp. NMEA_VEL is the actual answer -- see derive_vel().
+     * Kept as a knob because the harness prints the solution speed, and this
+     * is the thing to re-check if RTKLIB's filter is ever fixed upstream.
      *
      * Off by default so the file and serial runs documented in README.md
-     * reproduce byte for byte; loop_demo.sh turns it on.
+     * reproduce byte for byte.
      */
     if (getenv("DYNAMICS")) prcopt.dynamics = 1;
 
@@ -123,9 +284,22 @@ int main(int argc, char **argv)
     }
     /* NMEA_TCP=:port serves the solution so an autopilot can connect to it. */
     if (getenv("NMEA_TCP")) {
-        solopt[0].posf = SOLF_NMEA;
-        strs[3] = STR_TCPSVR;
-        paths[3] = getenv("NMEA_TCP");
+        nmea_path = getenv("NMEA_TCP");
+        if (own_nmea) {
+            /* The harness writes the sentences below; RTKLIB's own solution
+             * stream stays off so there is exactly one writer on the port. */
+            strs[3] = STR_NONE;
+            paths[3] = (char *)"";
+            solopt[0].posf = SOLF_LLH;
+        } else {
+            solopt[0].posf = SOLF_NMEA;
+            strs[3] = STR_TCPSVR;
+            paths[3] = getenv("NMEA_TCP");
+        }
+    }
+    if (own_nmea && !nmea_path) {
+        fprintf(stderr, "NMEA_VEL set without NMEA_TCP -- nothing to write to\n");
+        return 1;
     }
 
     for (i = 0; i < 3; i++) rcvopts[i] = ropt[i];
@@ -146,6 +320,17 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    if (own_nmea) {
+        strinit(&nmeastr);
+        if (!stropen(&nmeastr, STR_TCPSVR, STR_MODE_W, nmea_path)) {
+            fprintf(stderr, "cannot serve NMEA on %s\n", nmea_path);
+            rtksvrstop(&svr, cmds);
+            return 1;
+        }
+        printf("serving harness-formatted NMEA on %s "
+               "(velocity by differencing)\n", nmea_path);
+    }
+
     printf("%-10s %-3s %-14s %-15s %-10s %s\n",
            "time", "Q", "lat", "lon", "height", "base position (rtk.rb)");
 
@@ -159,8 +344,23 @@ int main(int argc, char **argv)
             double rb[3];
             int j;
             for (j = 0; j < 3; j++) rb[j] = svr.rtk.rb[j];
+            if (own_nmea) memcpy(ssat, svr.rtk.ssat, sizeof(ssat));
             svr.nsol = 0;
             rtksvrunlock(&svr);
+
+            if (own_nmea && n > 0 && sol.stat != SOLQ_NONE) {
+                /* Same sentences, and the same order, RTKLIB's solution
+                 * stream would have written. GGA/GSA/GSV are RTKLIB's own
+                 * and byte-identical; only RMC is ours -- see own_rmc(). */
+                uint8_t *p = nbuf;
+                derive_vel(&sol);
+                p += own_rmc(p, &sol);
+                p += outnmea_gga(p, &sol);
+                p += outnmea_gsa(p, &sol, ssat);
+                p += outnmea_gsv(p, &sol, ssat);
+                strwrite(&nmeastr, nbuf, (int)(p - nbuf));
+                nsent++;
+            }
 
             if (n > 0 && sol.stat != SOLQ_NONE) {
                 double pos[3];
@@ -186,6 +386,10 @@ int main(int argc, char **argv)
         }
     }
 
+    if (own_nmea) {
+        printf("\nNMEA epochs written: %d\n", nsent);
+        strclose(&nmeastr);
+    }
     printf("\nsolutions emitted: %d\n", nout);
     printf("final base position: %.4f %.4f %.4f\n",
            svr.rtk.rb[0], svr.rtk.rb[1], svr.rtk.rb[2]);

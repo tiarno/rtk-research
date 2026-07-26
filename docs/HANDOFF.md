@@ -29,6 +29,11 @@ of the injected offset, the displacement and the miss — not just in magnitude.
 So **"it repositioned to correct a drift that never happened" is now supported
 by both runs**, which is the line the last handoff wanted and could not have.
 
+> Those figures still carry `EK3_SRC1_VELXY 0`. They were superseded later the
+> same session by a stock-parameter re-run — see the next section, and quote
+> that table, not this one. The conclusion is unchanged; the numbers moved by
+> a few centimetres.
+
 `parse_sitl_log.py` gained two guards so this cannot recur silently: attack
 onset now requires a *sustained* offset (a clean control run's 30 m transit
 spikes 3 m of GPS lag and was being read as an attack), and it refuses to
@@ -41,18 +46,77 @@ produced attack-shaped displacements with no attack present.
 
 **Earlier that day:** the closed loop's instability was RTKLIB's NMEA reporting
 0.00 knots regardless of motion, which ArduPilot's EKF3 fuses by default;
-`EK3_SRC1_VELXY 0` fixes it and `prcopt.dynamics` does not, measured against a
-known 1 m/s ramp. Loop latency measured 130 ms and was exonerated. The shipped
-Windows binaries (`convbin.exe`, official and demo5 2.5.1) corrupt the station
-coordinate silently, rc=0, magnitude dial reproducing to the last digit, 32-
-and 64-bit identical; `_FORTIFY_SOURCE` is glibc-only and these are Embarcadero
-builds where the abort has no equivalent to enable.
+`EK3_SRC1_VELXY 0` worked around it and `prcopt.dynamics` did not, measured
+against a known 1 m/s ramp. Loop latency measured 130 ms and was exonerated.
+The shipped Windows binaries (`convbin.exe`, official and demo5 2.5.1) corrupt
+the station coordinate silently, rc=0, magnitude dial reproducing to the last
+digit, 32- and 64-bit identical; `_FORTIFY_SOURCE` is glibc-only and these are
+Embarcadero builds where the abort has no equivalent to enable.
 
-**The shipped Windows binaries are measured, not asserted.** `convbin.exe` from
-both the official distribution and demo5 2.5.1 corrupt the station coordinate
-silently, rc=0, with the magnitude dial reproducing to the last digit and 32-bit
-and 64-bit identical. `_FORTIFY_SOURCE` is glibc-only; these are Embarcadero
-builds where the abort has no equivalent to enable.
+## The demo now runs on stock ArduPilot parameters
+
+`EK3_SRC1_VELXY 0` is **gone**, and with it the last tuning deviation an
+audience could ask about. The only parameters `loop_demo.sh` sets now are the
+ones that wire the harness up: frame class, GPS type, serial protocol, stream
+rates.
+
+`NMEA_VEL=1` makes `e2e_harness.c` format the NMEA itself, filling
+`sol.rr[3..5]` by differencing successive solutions at 5 Hz. GGA/GSA/GSV are
+still RTKLIB's own writers and byte-identical; only RMC is ours, because of the
+second defect below.
+
+|  | control, 0 injected | attacked, 520 injected |
+|---|---|---|
+| GPS vs. truth after | 0.00 m | 1.92 m |
+| displacement holding | — | 1.86 m, **opposite** the offset (residual 0.04 m) |
+| waypoint miss | **0.04 m** | 1.86 m |
+
+The control lands within **4 cm**, better than the 9 cm the workaround
+achieved, and the attacked run still agrees with the open-loop measurement to
+within 5 cm per component. Removing the deviation made the result *better*,
+which is the strongest possible answer to "why is that setting changed?" — it
+was compensating for RTKLIB's NMEA writer, never for the attack.
+
+**Two defects had to be fixed to get there, and the second is the interesting
+one.**
+
+*Differencing alone was not enough.* `outnmea_rmc()` reports the previous
+course whenever speed is below 1 m/s (`static double dirp` in `solution.c`,
+starting at 0.0), so a correct speed arrives with a frozen bearing. Measured
+with no vehicle in the loop: fed 0.5 m/s due east, RTKLIB's RMC says 0.499 m/s
+on a course of 0.0° — 90° wrong. ArduPilot rebuilds velocity as speed × course
+and a hovering multirotor lives entirely in that band, so it is a *consistent*
+error the estimator integrates rather than noise it averages away. The aircraft
+oscillated ±3 m while holding, while the waypoint leg — flown above 1 m/s where
+the course is live — looked perfect. `own_rmc()` computes the course at every
+speed. Verified: 90.0° at 0.5 m/s east, 225.1° at 0.3 m/s south-west.
+
+*A stale binary.* The first `own_rmc()` attempt failed to compile (`NMEA_TID`
+and `KNOT2M` live in `solution.c`, not `rtklib.h`) and both scripts silently
+ran the *previous* binary, because the build check tested `[ -x $T/e2e_loop ]`
+— which passes when the old file is still there. It cost a full flight and
+nearly the wrong conclusion. Both scripts now `rm -f` first and test gcc's exit
+status.
+
+## Startup reliability — three guards added
+
+A live demo has to fail loudly and be immediately retryable. None of these
+were true this morning.
+
+- **`require_port` after every stage.** A leftover process held :5901, so
+  `gnss_sim` never bound, the chain ran empty, and it surfaced four minutes
+  later as `EKF never became ready` (flags 0x0400). On stage that looks exactly
+  like the attack failing. Now it aborts in 10 s naming the port and the log.
+- **`-DSVR_REUSEADDR`.** RTKLIB only sets `SO_REUSEADDR` on a TCP server under
+  this flag, so every run left :5901/:5902/:5903 unbindable for the TIME_WAIT
+  window and the *next* run died at startup. A demo you cannot immediately
+  retry is not a demo.
+- **Build failures are fatal**, as above.
+
+Two environment traps re-confirmed the hard way: `pkill -f loop_demo.sh` kills
+the invoking `bash -lc` too (it matches its own command line), and a
+`tail`-piped run shows no output at all until it exits — watch
+`/tmp/rtk-loop/flight.log` directly instead.
 
 ## Where this is going
 
@@ -67,37 +131,27 @@ reliability matters as much as the numbers.
 Effort figures are rough and assume the environment is already set up (see Key
 Parameters).
 
-**1. Emit our own NMEA RMC — ~half a day. The one that matters for the demo.**
-RTKLIB's rtksvr path populates no solution velocity (measured: zero with
-`prcopt.dynamics` on and off, against a rover fed a known 1 m/s ramp), so its
-RMC always reports 0.00 knots and the demo needs `EK3_SRC1_VELXY 0` to stay
-stable. Rather than chase RTKLIB's filter, stop using its NMEA writer and
-format RMC in `e2e_harness.c`, deriving speed and course by differencing
-successive solutions at 5 Hz. Then the demo runs on stock parameters. Say
-plainly that differencing stands in for the Doppler velocity a real receiver
-reports.
-
-**2. ARM offsets — ~1 hour, near-certain outcome.** Cross-compile the offset
+**1. ARM offsets — ~1 hour, near-certain outcome.** Cross-compile the offset
 probe for aarch64 and run it under qemu-user. The 32-vs-64-bit result already
 showed why it should be identical: everything ahead of `pos` in `sta_t` is
 `char` arrays and `int`s. Cheaply converts a stated unknown into "one payload
 length works on every target checked".
 
-**3. `decode_type1007` / `1008` — ~1 hour.** Same harness, different message
+**2. `decode_type1007` / `1008` — ~1 hour.** Same harness, different message
 type. Expect a negative result worth stating precisely: those fields stop short
 of `pos`, so memory-safety only, no positioning impact. It answers "why 1033?"
 
-**4. A patch PR to RTKLIB — nearly free.** The fix is a three-line clamp. It
+**3. A patch PR to RTKLIB — nearly free.** The fix is a three-line clamp. It
 will probably sit unmerged, which is the point: "here is the four-line fix,
 filed, still unmerged" closes better than "still unpatched".
 
-**5. Real hardware — a few hundred dollars, a weekend, biggest credibility
+**4. Real hardware — a few hundred dollars, a weekend, biggest credibility
 gain.** Note the F9P cannot be the target: it does not run RTKLIB. The setup is
 an F9P feeding real observations to **RTKNAVI on Windows** — now measured as
 unfortified — with the 1033 injected into an NTRIP correction stream. Upgrades
 the result from simulated to real satellites, real receiver, shipped software.
 
-**6. Embedded firmware (Emlid Reach) — uncertain, 90 min to find out.** Check
+**5. Embedded firmware (Emlid Reach) — uncertain, 90 min to find out.** Check
 first whether a ReachView image is downloadable without owning the device. If
 it is, binwalk plus `objdump` for `*_chk` imports. Either answer is a good
 slide, since the prediction is that Linux-based hardware lands in the *abort*
@@ -108,10 +162,35 @@ but 433/915 MHz is where real survey and agricultural rigs operate. "No RF was
 transmitted into open air" is a genuine virtue of this work. If it is ever
 wanted, do it conducted — attenuator or shielded enclosure — never radiated.
 
+## Files changed this session
+
+Committed in `e973bdd` (the sign resolution):
+
+| file | change |
+|---|---|
+| `research/inject_relay.py` | `--trigger PATH`: wait for a file instead of counting seconds |
+| `research/ardupilot_demo.py` | `--trigger-file PATH`: create it at phase 2, once airborne and holding |
+| `research/loop_demo.sh` | uses the trigger; `DELAY` gone |
+| `research/parse_sitl_log.py` | sustained-offset onset; refuses a displacement if the attack predates takeoff; phase 3 no longer keyed off the attack time |
+| `research/sign_check.py` | new — truth, GPS and EKF position in one frame |
+| `research/README.md`, `docs/HANDOFF.md` | corrected numbers, third harness defect written up |
+
+Then, for the stock-parameter demo:
+
+| file | change |
+|---|---|
+| `research/e2e_harness.c` | `derive_vel()` + `own_rmc()` + `NMEA_VEL=1` own-NMEA path; `DYNAMICS` comment corrected to say it does not work |
+| `research/loop_demo.sh` | `NMEA_VEL=1` replaces `DYNAMICS=1`; `EK3_SRC1_VELXY 0` removed from `loop.parm`; `require_port` after each stage; fatal build failures; `-DSVR_REUSEADDR` |
+| `research/loop_latency.py` | `feed --ramp/--ramp-dir`, new `speed` subcommand checking speed *and* course |
+| `research/loop_latency.sh` | `MODE=speed`; same build fixes |
+| `research/README.md`, `docs/HANDOFF.md` | stock-parameter numbers, the `dirp` course defect written up |
+
 ## Standing caveats
 
-- `EK3_SRC1_VELXY 0` is a harness workaround, not an attack property (item 1).
-- No embedded receiver firmware examined (item 6); ARM untested (item 2).
+- The harness derives its own GPS velocity by differencing, standing in for
+  Doppler. Estimator parameters are stock now, but the *receiver* is doing
+  something a real one would not have to.
+- No embedded receiver firmware examined (item 5); ARM untested (item 1).
 - Windows measurement covers the decode and coordinate corruption, not the
   real-time adoption via `update_antpos()` — the GUI apps were not driven.
 
@@ -215,6 +294,8 @@ going the way it did.)*
 | latency probe | `RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 90` — no vehicle, prints the loop delay |
 | `LEN` | 212 — declared `rectype` length, selects a 2.4 m base error |
 | attack trigger | `$T/attack.go`, created by the flight driver at phase 2. Replaced the `DELAY` timer, which raced the takeoff |
+| speed check | `MODE=speed RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 45` — no vehicle; feeds a 1 m/s ramp, prints the ground speed the RMC reports |
+| `NMEA_VEL` | `1` in `loop_demo.sh` — harness formats the NMEA and derives the velocity. Unset reverts to RTKLIB's writer and the documented file/serial runs |
 | `RUN` | 260 s — must outlast the whole flight profile or SITL loses its GPS mid-flight |
 | ports | 5901 base, 5902 rover, 5911 relay, 5903 NMEA, 5760 SITL SERIAL0, 5762 SERIAL1 |
 | base ECEF | `-3978242.4348,3382841.1715,3649902.7667` |
