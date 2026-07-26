@@ -167,11 +167,23 @@ an F9P feeding real observations to **RTKNAVI on Windows** — now measured as
 unfortified — with the 1033 injected into an NTRIP correction stream. Upgrades
 the result from simulated to real satellites, real receiver, shipped software.
 
-**5. Embedded firmware (Emlid Reach) — uncertain, 90 min to find out.** Check
-first whether a ReachView image is downloadable without owning the device. If
-it is, binwalk plus `objdump` for `*_chk` imports. Either answer is a good
-slide, since the prediction is that Linux-based hardware lands in the *abort*
-column, opposite the desktop apps.
+**5. Embedded firmware (Emlid Reach) — SOURCE DONE 2026-07-26, binary blocked.**
+`emlid/RTKLIB` branch `reach` carries the defect unchanged, the same `sta_t`
+layout (so the same payload lengths work), and the unvalidated adoption inlined
+into `updatesvr()` at `rtksvr.c:219`. Written up in `research/README.md`. That
+converts "a bug in a hobby library" into "a bug in a product you can buy", and
+ArduPilot documents Reach feeding a flight controller over ERB with corrections
+arriving on the telemetry radio — the harness chain with a real product in it.
+
+*Still open: which column the shipped binary is in.* `files.emlid.com` 403s all
+image paths, the Flash Tool fetches at runtime, and the Wayback holds only the
+Navio Raspbian images (different product, RTKLIB not confirmed present). Three
+ways forward, in cost order: observe what URL the Flash Tool fetches (free,
+uncertain); pull the 718 MB Navio image on the chance it ships Emlid-built
+RTKLIB ARM binaries (~45 min, speculative, but would also settle the ARM
+offsets in item 1 with a real binary instead of qemu); buy a Reach M2 (~$300,
+certain). Until one of these lands, the claim is "the source is affected", not
+"the product behaves this way".
 
 **Deliberately not doing: RF delivery.** Technically easy with the Heltec gear,
 but 433/915 MHz is where real survey and agricultural rigs operate. "No RF was

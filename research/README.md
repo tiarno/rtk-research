@@ -240,6 +240,59 @@ Linux build only.
 Demo5 shipped 2.5.1 on 2026-06-22, **13 days after** the FuzzingLabs issues
 were filed, with the bug unchanged.
 
+### A shipping receiver runs this code: Emlid Reach
+
+Everything above is desktop software. The question that decides whether this is
+a library bug or a *product* bug is whether any receiver you can buy runs the
+vulnerable decoder. One does.
+
+[`emlid/RTKLIB`](https://github.com/emlid/RTKLIB) is Emlid's fork, described by
+them as "used in Reach RTK receiver". Read on branch `reach` (also `master`;
+last pushed 2021-06-02), fetched 2026-07-26:
+
+- **`decode_type1033` is unchanged.** All five `strncpy` calls carry the same
+  wire-supplied lengths against the same 32-byte staging buffers, including the
+  `rectype`/`n1` line — the one field of the three that reaches `pos` and the
+  one FuzzingLabs' PoC does not drive.
+- **`sta_t` has the same layout ahead of `pos`.** `MAXANT` is 64, and the seven
+  `char[MAXANT]` arrays plus three `int`s precede `pos[3]` exactly as upstream,
+  so `pos` sits at offset 464 and **the same `n1` payloads work unmodified** —
+  no recomputation for this target. (Their `sta_t` drops `glo_cp_align` and
+  `glo_cp_bias` from the tail, which is after `pos` and does not matter.)
+- **The unvalidated adoption survives, inlined.** Emlid folded
+  `update_antpos()` into `updatesvr()` (`rtksvr.c:219`), where `ret==5` still
+  does the same thing with no plausibility check:
+
+```c
+else if (ret==5) { /* antenna position parameters */
+    if (svr->rtk.opt.refpos==POSOPT_RTCM&&index==1) {
+        for (i=0;i<3;i++) {
+            svr->rtk.rb[i]=svr->rtcm[1].sta.pos[i];
+        }
+```
+
+  `postpos.c:1038` still guards the post-processing path with
+  `norm(sta[i].pos,3)>0.0`. The same asymmetry as upstream: the real-time path
+  is the unguarded one.
+
+**Why this matters more than the desktop result.** ArduPilot documents Reach as
+a supported RTK GPS: the unit mounts on the vehicle, outputs coordinates to the
+flight controller over serial in Emlid's ERB protocol, and — per ArduPilot's own
+page — "can receive base corrections over telemetry radio, thus not requiring a
+separate correction link to the drone." That is the chain this harness
+simulates, with a real product in the receiver position and an unauthenticated
+radio link carrying the corrections into it.
+
+**What is not established: which column the shipped binary falls into.** The
+source is vulnerable; whether Emlid's build has `_FORTIFY_SOURCE` active
+decides between a silent 2 m corruption and one packet killing the receiver.
+Both are results and neither is measured. The image is not casually obtainable
+— `files.emlid.com` returns 403 for image paths and directory listings, the
+Reach Firmware Flash Tool fetches the image at runtime rather than publishing a
+URL, and the Wayback Machine holds only Emlid's *Navio* Raspbian images, which
+are a different product and not confirmed to ship RTKLIB binaries at all.
+Settling it needs either the flash tool's fetch observed or the hardware.
+
 ### Effect on the solution
 
 Feeding those magnitudes to RTKLIB's own positioning engine (`rnx2rtkp`,
@@ -808,9 +861,13 @@ Read these before quoting anything above.
 - The fortified/unfortified split was measured on glibc + gcc 7.5 on x86-64.
   The shipped Windows binaries were then run directly and corrupt the
   coordinate silently — see "The same dial on the binaries people actually
-  run" — but **no embedded receiver firmware has been examined**. Emlid
-  Reach, ArduSimple and similar are Linux-based and would plausibly land in
-  the *fortified* column — the opposite of the desktop applications. That is
-  unverified and worth doing before claiming anything about hardware products.
+  run". Emlid Reach's **source** is now confirmed to carry the defect and the
+  unvalidated adoption, with a layout that takes the same payload lengths (see
+  "A shipping receiver runs this code"), but **no receiver firmware binary has
+  been examined**. Reach is Linux-based and would plausibly land in the
+  *fortified* column — the opposite of the desktop applications, and a
+  different headline: one packet as a remote DoS on a survey receiver rather
+  than a silent metre-scale lie. Until a binary is checked, say "the source is
+  affected", not "the product behaves this way".
 - `dgps` being zeroed is guarded at `rtcm2.c:71` (`if (rtcm->dgps)`), so it
   silently disables DGPS correction output rather than faulting.
