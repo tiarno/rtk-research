@@ -51,12 +51,12 @@ def main():
         if t is None:
             continue
         if m.get_type() == "SIM":
-            sim.append((t / 1e6, m.Lat, m.Lng))
             a = getattr(m, "Alt", None)
+            sim.append((t / 1e6, m.Lat, m.Lng, a))
             if a is not None:
                 alt.append((t / 1e6, a))
         elif getattr(m, "I", 0) == 0 and getattr(m, "Status", 0) >= 3:
-            gps.append((t / 1e6, m.Lat, m.Lng))
+            gps.append((t / 1e6, m.Lat, m.Lng, getattr(m, "Alt", None)))
 
     if not sim or not gps:
         sys.exit(f"no SIM ({len(sim)}) or GPS ({len(gps)}) records found")
@@ -65,14 +65,22 @@ def main():
     print(f"log spans {sim[0][0]:.1f}..{sim[-1][0]:.1f} s")
 
     # For each GPS sample, the nearest truth sample, and the offset between.
+    #
+    # The vertical is carried alongside but never folded into the magnitude the
+    # onset detector uses. A corrupted base coordinate moves the solution in all
+    # three axes, and roughly a third of the ECEF error lands in height -- but
+    # the aircraft's altitude comes mostly from its barometer, so mixing the
+    # vertical into the horizontal would compare two quantities the autopilot
+    # weighs completely differently.
     si = 0
     offs = []
-    for gt, gla, glo in gps:
+    for gt, gla, glo, gz in gps:
         while si + 1 < len(sim) and abs(sim[si + 1][0] - gt) < abs(sim[si][0] - gt):
             si += 1
-        st, sla, slo = sim[si]
+        st, sla, slo, sz = sim[si]
         dn, de = ne(gla - sla, glo - slo, sla)
-        offs.append((gt, math.hypot(dn, de), dn, de))
+        dz = (gz - sz) if (gz is not None and sz is not None) else None
+        offs.append((gt, math.hypot(dn, de), dn, de, dz))
 
     # Find where the GPS-vs-truth offset steps -- and stays stepped.
     #
@@ -142,11 +150,15 @@ def main():
                   f"{t_attack - airborne:.0f}s before the attack)")
 
     def truth_window(t0, t1):
-        pts = [(la, lo_) for t, la, lo_ in sim if t0 <= t <= t1]
+        """Mean truth position over a window: (lat, lon, alt). `alt` is None if
+        the log carried no SIM altitude, and callers must tolerate that."""
+        pts = [(la, lo_, az) for t, la, lo_, az in sim if t0 <= t <= t1]
         if not pts:
             return None
+        zs = [p[2] for p in pts if p[2] is not None]
         return (sum(p[0] for p in pts) / len(pts),
-                sum(p[1] for p in pts) / len(pts))
+                sum(p[1] for p in pts) / len(pts),
+                (sum(zs) / len(zs)) if zs else None)
 
     expected = 0.0
     if t_attack is not None:
@@ -169,6 +181,35 @@ def main():
               f"|{math.hypot(inj_n, inj_e):.2f} m|")
         print(f"  true position moved : N={dn:+.2f} m  E={de:+.2f} m  "
               f"|{math.hypot(dn, de):.2f} m|")
+
+        # Vertical, reported separately and never mixed into the horizontal.
+        inj_z = [o[4] for o in injected if o[4] is not None]
+        pre_z = [o[4] for o in offs
+                 if o[4] is not None and t_attack - 20 <= o[0] <= t_attack - 1]
+        if inj_z and pre_z and before[2] is not None and after[2] is not None:
+            vz_before = sum(pre_z) / len(pre_z)
+            vz_after = sum(inj_z) / len(inj_z)
+            dz_true = after[2] - before[2]
+            print(f"\n  vertical, measured separately:")
+            print(f"    GPS height error    : {vz_before:+.2f} m before -> "
+                  f"{vz_after:+.2f} m during")
+            print(f"    true height moved   : {dz_true:+.2f} m")
+            step = vz_after - vz_before
+            if abs(step) < 0.25:
+                print("    the height solution barely moved -- nothing to respond to.")
+            elif abs(dz_true) < abs(step) * 0.25:
+                print(f"    the aircraft did NOT follow it ({abs(dz_true):.2f} m "
+                      f"against a {abs(step):.2f} m lie).")
+                print("    Expected: ArduPilot's EKF takes height from the")
+                print("    barometer by default, so a corrupted GPS height is")
+                print("    largely ignored. The horizontal has no such second")
+                print("    source, which is why only it moves the aircraft.")
+            else:
+                print(f"    the aircraft followed it by {dz_true:+.2f} m against "
+                      f"a {step:+.2f} m lie -- height IS being fused.")
+        else:
+            print("\n  vertical: not measurable from this log "
+                  "(no SIM/GPS altitude pair)")
 
         expected = math.hypot(inj_n, inj_e)
         actual = math.hypot(dn, de)
@@ -206,7 +247,7 @@ def main():
         # the aircraft was furthest from the waypoint -- the hold point, in
         # this profile -- rather than from the attack time, which the control
         # run does not have.
-        cand = [(t, la, lo_) for t, la, lo_ in sim if t <= sim[-1][0] - 20]
+        cand = [(t, la, lo_) for t, la, lo_, _z in sim if t <= sim[-1][0] - 20]
         far = max(cand, key=lambda p: math.hypot(
             *ne(p[1] - wp_lat, p[2] - wp_lon, wp_lat))) if cand else None
         start = truth_window(far[0] - 5, far[0]) if far else None

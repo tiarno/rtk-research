@@ -722,8 +722,44 @@ The cost of the change is 0.5 m of drama. What it buys is that nothing in the
 demo depends on a coincidence: **1.8 m here, under 2 m everywhere, no knowledge
 of the base coordinates required.**
 
-Note the remaining ~1.1 m is vertical (1.80 m ECEF against 1.41 m horizontal)
-and is **not measured at the aircraft** — `parse_sitl_log.py` computes N/E only.
+#### The vertical third of the error does nothing, and that is the interesting part
+
+1.80 m of ECEF error against 1.41 m horizontal leaves ~1.1 m in height.
+`parse_sitl_log.py` now measures it, separately from the horizontal and never
+folded into it, because the autopilot weighs the two completely differently.
+
+| | control | attacked |
+|---|---|---|
+| vertical GPS-vs-truth, t=65–84 s | −36.320 m | −36.321 m |
+| vertical GPS-vs-truth, t=90–115 s | −36.320 m | −37.440 m |
+| **step** | **0.000 m** (σ 0.005 m) | **−1.120 m** |
+| aircraft's true height change | — | **−0.04 m** |
+
+The constant −36.32 m is a datum difference between `GPS.Alt` and `SIM.Alt`,
+identical in both runs and irrelevant — the step is what matters, and the
+control's is zero to three decimal places, so the 1.12 m is the attack.
+
+It was also **predicted before it was measured**: √(1.80² − 1.41²) = 1.12 m.
+That is now the third independent confirmation that the truncation model, the
+ECEF-to-local geometry and the measured response compose correctly.
+
+**The aircraft ignored it.** 0.04 m of true height change against a 1.12 m lie
+— a 3% response, against the horizontal's ~97%. The reason is not subtle:
+ArduPilot's EKF3 takes height from the **barometer** by default
+(`EK3_SRC1_POSZ`), so a corrupted GPS height is outvoted by a sensor the
+attacker never touched. Horizontally there is no second opinion — nothing else
+on the airframe knows where it is — so the lie goes through unopposed.
+
+That is worth stating plainly rather than burying, for two reasons. It **bounds
+the attack honestly**: roughly a third of the injected error is wasted, and the
+effect is horizontal-only on a multirotor configured this way. And it points
+straight at the defence: the axis with a redundant, independent sensor resisted;
+the axis without one moved. Nothing about this is specific to barometers.
+
+A corollary for anyone extending this: a vehicle that *does* fuse GPS height —
+a fixed-wing without a reliable baro reference, or any configuration with
+`EK3_SRC1_POSZ` set to GPS — should be expected to move in all three axes. That
+is untested here.
 
 **Three harness defects had to be fixed first, and all three produced results
 that looked like attack effects.**

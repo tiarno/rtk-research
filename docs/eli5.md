@@ -120,6 +120,23 @@ A machine that is confidently wrong is more dangerous than one that knows it is
 broken. A metre and a half is a crop row or two, a third of a road lane, or the
 difference between the landing pad and what's beside it.
 
+**One part of the lie bounced off, and it teaches the lesson.** The false
+position is wrong in three directions — sideways, forwards, and *up*. About a
+third of the error was in height: the GPS told the drone it was 1.1 m lower
+than it really was. The drone ignored it almost completely — it moved 4 cm.
+
+Why? Because a drone has a **second opinion about height**. It carries a
+barometer, which measures air pressure and knows nothing about GPS. When the
+two disagree, the barometer wins. The attacker never touched it, so the lie
+about height was outvoted.
+
+There is no second opinion about where it is *horizontally*. Nothing else on
+the aircraft knows. So that part of the lie goes through unopposed — which is
+exactly why the drone moved sideways and not down.
+
+That is the whole defence in one sentence: **the direction with a backup sensor
+resisted; the direction without one moved.**
+
 ---
 
 ## Which software is affected

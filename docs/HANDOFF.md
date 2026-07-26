@@ -239,6 +239,7 @@ Committed in `5b9a0f5` (the stock-parameter demo):
 | control run | the same with `0` — injection disabled. Run it *first*; it should land within centimetres (last: 0.03 m) |
 | latency probe | `RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 90` — no vehicle, prints the loop delay |
 | `LEN` | **211** — the rung that generalises: a 2 m quantum, so bounded error against any base. 212 was a 512 m quantum that happened to land on 2.4 m against the old base |
+| vertical | measured, and it is a **negative**: a 1.12 m height lie moved the aircraft 0.04 m, because EKF3 takes height from the baro (`EK3_SRC1_POSZ`). Control step 0.000 m. The attack is horizontal-only on this airframe |
 | attack trigger | `$T/attack.go`, created by the flight driver at phase 2. Replaced the `DELAY` timer, which raced the takeoff |
 | speed check | `MODE=speed RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 45` — no vehicle; feeds a 1 m/s ramp, prints the ground speed the RMC reports |
 | `NMEA_VEL` | `1` in `loop_demo.sh` — harness formats the NMEA and derives the velocity. Unset reverts to RTKLIB's writer and the documented file/serial runs |
