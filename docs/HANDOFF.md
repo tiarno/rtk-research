@@ -2,6 +2,22 @@
 
 **Session date:** 2026-07-26 (second session that day)
 
+## Current state, in one paragraph
+
+The closed loop works, runs on a **stock ArduPilot parameter set**, and its
+numbers agree with the independently measured open-loop run to within 5 cm per
+component — magnitude *and* direction. Both of the priorities the last handoff
+opened with are done and committed (`e973bdd`, `5b9a0f5`); the working tree is
+clean. Nothing is blocked. The next item is ARM offsets under qemu-user, ~1
+hour, near-certain outcome, and nothing downstream depends on it.
+
+The one thing to carry forward: **run `./loop_demo.sh 0` before quoting any
+closed-loop number.** Three harness defects have produced attack-shaped results
+with no attack present, and the control run is what caught each of them. A
+fourth — RTKLIB's frozen RMC course — degraded the attacked run instead, and
+was caught only because the displacement disagreed with a figure measured a
+different way. Both checks earn their keep.
+
 ## Since the last handoff
 
 **The displacement sign is resolved, and it cost a number.** The two runs
@@ -175,7 +191,7 @@ Committed in `e973bdd` (the sign resolution):
 | `research/sign_check.py` | new — truth, GPS and EKF position in one frame |
 | `research/README.md`, `docs/HANDOFF.md` | corrected numbers, third harness defect written up |
 
-Then, for the stock-parameter demo:
+Committed in `5b9a0f5` (the stock-parameter demo):
 
 | file | change |
 |---|---|
@@ -184,6 +200,34 @@ Then, for the stock-parameter demo:
 | `research/loop_latency.py` | `feed --ramp/--ramp-dir`, new `speed` subcommand checking speed *and* course |
 | `research/loop_latency.sh` | `MODE=speed`; same build fixes |
 | `research/README.md`, `docs/HANDOFF.md` | stock-parameter numbers, the `dirp` course defect written up |
+
+## Key Parameters/Settings
+
+| | |
+|---|---|
+| branch | `master` |
+| RTKLIB | `~/RTKLIB` in WSL, branch `rtklib_2.4.3`, commit `180043e` |
+| ArduPilot SITL | `~/apsitl/arducopter` (prebuilt ArduCopter 4.7.0) |
+| run command | `RTKLIB=/home/tim/RTKLIB BIN=/home/tim/apsitl/arducopter bash ./loop_demo.sh 212` from `/mnt/c/Users/tim/work/rtk/research` in WSL Ubuntu |
+| control run | the same with `0` instead of `212` — injection disabled. Run it *first*; it should land within centimetres |
+| latency probe | `RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 90` — no vehicle, prints the loop delay |
+| `LEN` | 212 — declared `rectype` length, selects a 2.4 m base error |
+| attack trigger | `$T/attack.go`, created by the flight driver at phase 2. Replaced the `DELAY` timer, which raced the takeoff |
+| speed check | `MODE=speed RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 45` — no vehicle; feeds a 1 m/s ramp, prints the ground speed the RMC reports |
+| `NMEA_VEL` | `1` in `loop_demo.sh` — harness formats the NMEA and derives the velocity. Unset reverts to RTKLIB's writer and the documented file/serial runs |
+| `RUN` | 260 s — must outlast the whole flight profile or SITL loses its GPS mid-flight |
+| ports | 5901 base, 5902 rover, 5911 relay, 5903 NMEA, 5760 SITL SERIAL0, 5762 SERIAL1 |
+| base ECEF | `-3978242.4348,3382841.1715,3649902.7667` |
+| scratch | `/tmp/rtk-loop` (logs: `sim.log`, `relay.log`, `rtklib.log`, `mavpos.log`, `sitl.log`, `flight.log`) |
+
+Two environment traps worth remembering:
+
+- `pkill -f <pattern>` matches the invoking `bash -lc '...'` command line
+  itself if the pattern appears in it, so an ad-hoc cleanup command can kill its
+  own shell and exit silently.
+- `$VAR` does not survive `wsl.exe -- bash -lc '...'` from Git Bash. Use
+  explicit paths or a script file, and `MSYS_NO_PATHCONV=1` for `/mnt/...`
+  arguments.
 
 ## Standing caveats
 
@@ -281,34 +325,6 @@ should go into `research/README.md` until the vehicle is stable.
 *(Superseded — all four are done. The current plan is "Next steps, in the order
 I would take them" near the top. Item 1 there is what came out of item 1 here
 going the way it did.)*
-
-## Key Parameters/Settings
-
-| | |
-|---|---|
-| branch | `master` |
-| RTKLIB | `~/RTKLIB` in WSL, branch `rtklib_2.4.3`, commit `180043e` |
-| ArduPilot SITL | `~/apsitl/arducopter` (prebuilt ArduCopter 4.7.0) |
-| run command | `RTKLIB=/home/tim/RTKLIB BIN=/home/tim/apsitl/arducopter bash ./loop_demo.sh 212` from `/mnt/c/Users/tim/work/rtk/research` in WSL Ubuntu |
-| control run | the same with `0` instead of `212` — injection disabled. Run it *first*; it should land within centimetres |
-| latency probe | `RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 90` — no vehicle, prints the loop delay |
-| `LEN` | 212 — declared `rectype` length, selects a 2.4 m base error |
-| attack trigger | `$T/attack.go`, created by the flight driver at phase 2. Replaced the `DELAY` timer, which raced the takeoff |
-| speed check | `MODE=speed RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 45` — no vehicle; feeds a 1 m/s ramp, prints the ground speed the RMC reports |
-| `NMEA_VEL` | `1` in `loop_demo.sh` — harness formats the NMEA and derives the velocity. Unset reverts to RTKLIB's writer and the documented file/serial runs |
-| `RUN` | 260 s — must outlast the whole flight profile or SITL loses its GPS mid-flight |
-| ports | 5901 base, 5902 rover, 5911 relay, 5903 NMEA, 5760 SITL SERIAL0, 5762 SERIAL1 |
-| base ECEF | `-3978242.4348,3382841.1715,3649902.7667` |
-| scratch | `/tmp/rtk-loop` (logs: `sim.log`, `relay.log`, `rtklib.log`, `mavpos.log`, `sitl.log`, `flight.log`) |
-
-Two environment traps worth remembering:
-
-- `pkill -f <pattern>` matches the invoking `bash -lc '...'` command line
-  itself if the pattern appears in it, so an ad-hoc cleanup command can kill its
-  own shell and exit silently.
-- `$VAR` does not survive `wsl.exe -- bash -lc '...'` from Git Bash. Use
-  explicit paths or a script file, and `MSYS_NO_PATHCONV=1` for `/mnt/...`
-  arguments.
 
 ## Files Changed
 
