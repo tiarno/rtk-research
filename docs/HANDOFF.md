@@ -200,10 +200,20 @@ image paths and the Flash Tool fetches at runtime. Two ways left: observe what
 URL the Flash Tool requests (free, uncertain), or buy a Reach M2 (~$300,
 certain). Note the prediction that it would abort no longer has a basis.
 
-**Deliberately not doing: RF delivery.** Technically easy with the Heltec gear,
-but 433/915 MHz is where real survey and agricultural rigs operate. "No RF was
-transmitted into open air" is a genuine virtue of this work. If it is ever
-wanted, do it conducted — attenuator or shielded enclosure — never radiated.
+**RF delivery: now planned, and conducted only.** Superseded 2026-07-26 — the
+talk wants it. The constraint that produced the original "not doing" stands
+unchanged and is the design, not a caveat: 433/868/915 MHz is where real survey
+and agricultural rigs operate, so **everything goes down coax through
+attenuators into a shielded enclosure, never a radiated signal**. "No RF was
+transmitted into open air" remains a virtue of this work and is also the only
+version that is reliable on a conference floor.
+
+The Emlid finding changed the priority. Reach uses **LoRa** for its base↔rover
+correction link (902–928 MHz US, 863–870 MHz EU), which is SX1262 — the same
+chip as the Heltec V3 boards already on hand. Professional rigs (Trimble
+TDL450, Satel 4Pro) are a different animal: GMSK/4FSK, 403–473 MHz, transparent
+serial. Full plan, both paths, and the hardware list in
+[talk-outline.md](talk-outline.md#8-delivering-it-over-the-air).
 
 ## Files changed this session
 

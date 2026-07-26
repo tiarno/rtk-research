@@ -45,6 +45,8 @@ end-to-end.
 
 ## Documents
 
+- [docs/talk-outline.md](docs/talk-outline.md) — the talk this is destined for: beat sheet, demo staging, RF delivery plan, and the hardware list
+- [docs/eli5.md](docs/eli5.md) — the whole thing in plain language, no GNSS background assumed
 - [docs/rtk-rtklib-research-notes.md](docs/rtk-rtklib-research-notes.md) — background research, prior art, and the four disclosed decoder bugs
 - [docs/rtklib-claude-code-briefing.md](docs/rtklib-claude-code-briefing.md) — original task breakdown
 - [docs/rtk-delivery-path-summary.md](docs/rtk-delivery-path-summary.md) — how attacker bytes physically reach the decoder (UHF radio, NTRIP MITM, rogue caster)
