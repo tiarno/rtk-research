@@ -94,7 +94,17 @@ Every error in the base position passes straight into the rover's answer. We
 watched this over 85 consecutive position fixes: the position moved by exactly
 the injected amount, and the quality flags were **identical** to a clean run.
 Same number of "RTK FIXED" readings, same flag at every single moment. No
-warning, no log entry, no crash.
+warning, no crash, and nothing written down anywhere saying the base station
+moved.
+
+There is a diagnostic log you can switch on, and it is worth knowing what it
+does and doesn't tell you, because it is the closest thing to a defence that
+already exists. Turned all the way up, it records one line per antenna message
+— and that line shows only the first 31 characters of the text, which the
+attacker writes and can make look completely ordinary. The oversized number
+that causes all the damage is never written down at all, and neither is the
+fact that the base station's coordinates just changed. The instrument exists;
+it is pointed at the wrong thing.
 
 **5. The autopilot is handed that position as an ordinary GPS feed.**
 The GPS software emits standard GPS sentences over a serial cable. The flight

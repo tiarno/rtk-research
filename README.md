@@ -15,7 +15,10 @@ the binary was built:
   — the process aborts. One packet is a remote DoS.
 - **unfortified build** — the base-station coordinates shift silently. The
   receiver keeps reporting **Q=1 (RTK fixed)** while emitting a position metres
-  from truth. No crash, no log entry, no AddressSanitizer report.
+  from truth. No crash, no AddressSanitizer report, and nothing in any log
+  recording that the base coordinate moved — with tracing compiled in and
+  turned all the way up, all an operator gets is one line showing a
+  plausible-looking antenna descriptor.
 
 **Every build measured so far is in the second column**, which was not the
 expectation going in. Both Windows distributions (the official one and demo5)

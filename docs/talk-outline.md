@@ -329,13 +329,30 @@ The section that separates this from a bug writeup. Tell it as failures.
   reads *"here is the fix, filed, still unmerged."*
 - For operators, in priority order:
   1. Set the base coordinate **manually** where you can — the attack needs the
-     rover to take its base position from the stream.
+     rover to take its base position from the stream. Concede the limit
+     honestly: this is free for a fixed base, and not always available, because
+     taking the base coordinate from the stream is part of what makes it RTK.
+     Of RTKLIB's seven shipped example configs, the *one* that does real-time
+     RTK is the one that sets `ant2-postype=rtcm`. It isn't an exotic setting
+     somebody opted into.
   2. TLS on NTRIP where the caster offers it.
   3. Sanity-check the base coordinate against a known value. A 2 m jump in a
      station that hasn't moved since installation is trivially detectable, and
-     nothing does it.
+     nothing does it. **Nothing even records it** — see below.
   4. Cross-check position against any independent source — the barometer lesson
      from §9, generalised.
+
+**The logging slide, if there's room.** RTKLIB has a trace facility, and at
+maximum verbosity it logs one line per 1033: the antenna and receiver
+descriptor text. But it prints the *staging buffers*, capped at 31 characters —
+so a message declaring length 255 logs identically to a benign one, the
+attacker picks what those 31 characters say, and the declared length appears
+nowhere at any level. The routine that actually adopts the corrupted coordinate
+into the baseline emits no trace at all; it increments a message counter.
+
+*The instrument exists and it is pointed at the wrong thing* — which is a
+better closing note for the defence section than "nothing is logged," and it is
+the one thing on the list a vendor could fix in an afternoon.
 
 ## 12. Close (1 min)
 
@@ -368,6 +385,8 @@ and we built an entire industry on a broadcast nobody signs."*
 | "Did you pick a lucky length?" | Yes — originally. That's §4. The demo now runs the rung that's bounded against any base. |
 | "Who actually runs RTKLIB?" | Emlid Reach, demo5 users, Debian's package on 12 architectures, RTKNAVI operators. §5 and §6. |
 | "Real drones use an F9P, not RTKLIB." | Correct, and worth conceding. The F9P does RTK on-chip. Reach is the counter-example, and ArduPilot documents it. |
+| "Isn't that a niche configuration?" | No. It's not the compiled default, but of the seven example configs RTKLIB ships, the only one set up for real-time RTK is the only one that enables it. Post-processing and single-point modes have no stream to take a base position from. |
+| "Wouldn't it show up in the logs?" | No. Max verbosity logs 31 characters of attacker-chosen text and never the length; the coordinate adoption isn't traced at all. |
 | "Did you test real hardware?" | No. Say it plainly, then say exactly what *was* measured end to end. |
 | "Did you transmit?" | Conducted only, into a shielded enclosure. Never radiated. |
 | "Is this a 0-day?" | No. Public since June 2026. What's new is where the spill lands and which builds fail silently. |

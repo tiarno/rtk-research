@@ -30,7 +30,8 @@ this turns out to be the most important fact here:
 In the unfortified case the interesting band is a small one. A shift of
 ~0.4-2.5 m leaves RTKLIB reporting **Q=1 (RTK fixed)** — its highest quality
 flag — while the position it emits is wrong by roughly the amount injected.
-Nothing crashes, nothing is logged, and AddressSanitizer reports nothing.
+Nothing crashes, no log records the coordinate changing, and AddressSanitizer
+reports nothing.
 
 That is the answer to the question the project started from: *can an attacker
 manipulate a precision GNSS rover while it continues to report a healthy fix?*
@@ -107,8 +108,42 @@ The post-processing path guards this with `norm(sta[i].pos,3)>0.0`
 message both corrupts the base position and triggers its adoption into the
 baseline.
 
-Requires `refpos=POSOPT_RTCM` — base position taken from the correction
-stream — which is the normal RTK configuration.
+### Which configurations are exposed
+
+Requires `refpos=POSOPT_RTCM` — the base position taken from the correction
+stream rather than entered by hand. That is **not** RTKLIB's compiled default:
+`options.c:503` initialises `antpostype_` to 0 (LLH). But it is what the
+shipped RTK example tells you to use.
+
+Of the six example configurations in the source tree, exactly one is set up for
+real-time RTK against an RTCM3 stream — and it is also the only one that
+selects the vulnerable setting:
+
+| config | `pos1-posmode` | `inpstr2-format` | `ant2-postype` |
+|---|---|---|---|
+| `app/consapp/rtkrcv/conf/rtk.conf` | kinematic | **rtcm3** | **rtcm** |
+| `app/consapp/rtkrcv/conf/single.conf` | single | — | llh |
+| `app/consapp/rtkrcv/gcc/rtkrcv.conf` | single | oem4 | llh |
+| `app/consapp/rnx2rtkp/gcc/opts1.conf` | static | post-processing | single |
+| `app/consapp/rnx2rtkp/gcc/opts2.conf` | kinematic | post-processing | llh |
+| `app/consapp/rnx2rtkp/gcc/opts3.conf` | kinematic | post-processing | llh |
+| `app/consapp/rnx2rtkp/gcc/opts4.conf` | static | post-processing | llh |
+
+`ant2-postype=rtcm` is option 5, which `options.c:409` (`*ps=antpostype_[i]-1`,
+with `ps` bound to `prcopt_.refpos` for index 1) maps to `refpos=4` —
+`POSOPT_RTCM`.
+
+So the honest statement is narrower than "the normal RTK configuration" and
+also stronger than a default would be. The other six are single-point or
+post-processing modes, which have no live correction stream to take a base
+position from in the first place. **The one shipped configuration that does
+real-time RTK is the vulnerable one**, because taking the base coordinate from
+the stream is part of what makes it RTK rather than something an operator opted
+into.
+
+**Not checked:** what RTKNAVI's GUI selects on a fresh install, what demo5
+ships, and what Emlid Reach's web UI configures. Those want measuring before
+any claim about the configuration of deployed receivers.
 
 ## Results
 
@@ -432,6 +467,54 @@ degradation, no rejection.
 So the answer to "what does the receiver do about it" is: **nothing**. It does
 not notice. It emits a position 2.4 m from truth while reporting exactly the
 confidence it reports when everything is correct.
+
+### What an operator could see, with tracing fully enabled
+
+"Nothing is logged" is close but not exact, and the exact version is better.
+RTKLIB does have a trace facility, and the 1033 decoder does write to it. Read
+at `rtcm3.c` and `rtksvr.c`, three things are true.
+
+**The success path emits one line, at level 3:**
+
+```c
+trace(3,"rtcm3 1033: ant=%s:%s rec=%s:%s:%s\n",des,sno,rec,ver,rsn);
+```
+
+**That line cannot show the attack.** It prints the *staging buffers*, not the
+wire fields — and the read loops that fill them are bounded at `j<n1&&j<31`. So
+the log shows at most the first 31 characters of the receiver-type field, which
+the attacker chooses and can make read like an ordinary descriptor. A message
+declaring `n1=255` produces a trace line indistinguishable from a benign one.
+**The declared length never appears in any log output at any level.** The only
+other thing written is the station id, via the `rtcm->outtype` branch:
+`sprintf(msg," staid=%4d",staid)`.
+
+**The damaging step is not traced at all.** `update_antpos()` (`rtksvr.c:251`),
+which copies the corrupted coordinate into `svr->rtk.rb`, contains no trace call
+— the whole function is quoted under "Why this is a positioning bug" above, and
+a grep of `rtksvr.c` finds nothing logging `rb` on this path. The only record
+that a base position was adopted at all is a counter increment,
+`svr->nmsg[index][4]++`.
+
+There is a level-2 trace, `rtcm3 1033 length error: len=%d`, but it fires only
+when the declared field lengths exceed the frame — `i+60+8*(n+m+n1+n2+n3) <=
+rtcm->len*8`. The attack frame is internally consistent (it really does carry
+255 bytes of receiver-type data; the decoder simply copies only 31 of them into
+a buffer and then writes `n1` bytes out of it), so this never fires.
+
+Two further gates before any of the above is even reachable: trace output is
+compiled out entirely unless `TRACE` is defined (`rtkcmn.c:3023` — otherwise
+`trace()` is an empty stub), and `level_trace` initialises to 0 against a guard
+of `if (!fp_trace||level>level_trace) return`. The trace strings *are* present
+in the shipped Windows binaries and in Debian's armhf `rtkrcv` (see above), so
+those builds have it compiled in — but an operator would still have to open a
+trace file and explicitly raise the level to 3.
+
+**The accurate claim, then:** at default settings nothing is written. With
+tracing compiled in and turned all the way up, an operator gets one line
+recording a plausible-looking antenna descriptor, and **still no record that the
+base station's coordinates changed**. The instrumentation exists and watches the
+wrong thing.
 
 ### Over a serial link
 

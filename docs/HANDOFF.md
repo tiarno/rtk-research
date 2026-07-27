@@ -1,6 +1,45 @@
 # Handoff Notes
 
-**Session date:** 2026-07-26 (second session that day)
+**Session date:** 2026-07-27
+
+## 2026-07-27: two claims tightened ahead of disclosure
+
+Both were things already in writing that would not have survived contact with
+the people best equipped to check them. Neither changes a result.
+
+**"Nothing is logged" was imprecise, and the precise version is better.**
+`decode_type1033` does trace, at level 3 — but it prints the *staging buffers*,
+which the read loops cap at 31 characters. A message declaring `n1=255` logs a
+line indistinguishable from a benign one, the attacker chooses those 31
+characters, and the declared length never appears at any level. `update_antpos()`
+— the function that adopts the corrupted coordinate — has no trace call at all;
+the only trace of it is `svr->nmsg[index][4]++`. Written up as "What an operator
+could see, with tracing fully enabled" in `research/README.md`, and corrected in
+`README.md` and `eli5.md`. **The instrument exists and is pointed at the wrong
+thing** is now the line, and it doubles as the one defence a vendor could ship
+in an afternoon (§11).
+
+**`refpos=POSOPT_RTCM` is not the default, and the honest framing is stronger
+than the one it replaces.** `options.c:503` initialises `antpostype_` to 0
+(LLH). But of the seven example configs in the tree, `rtkrcv/conf/rtk.conf` is
+the only one configured for real-time RTK against an RTCM3 stream, and it is
+the only one setting `ant2-postype=rtcm`. The rest are single-point or
+post-processing, which have no correction stream to take a base position from.
+So it is not "the normal RTK configuration" (vague, and challengeable) but
+"every shipped config that does RTK at all" (checkable, and stronger). Table in
+`research/README.md` under "Which configurations are exposed"; §11's operator
+advice and the audience-question table updated.
+
+**Next: the disclosure moves.** The repo is already public and has been since
+2026-07-19, so priority is established but undiscoverable. In order: comment on
+RTKLIB issue #799 stating that the overflow reaches `sta.pos` and linking here;
+email FuzzingLabs; notify Emlid (obligation — the repo publicly documents that
+their product's source carries it — and they may simply answer the
+fortified/unfortified question for free). Patch PR after.
+
+---
+
+**Previous session:** 2026-07-26 (second session that day)
 
 ## Current state, in one paragraph
 
@@ -323,6 +362,10 @@ Two environment traps worth remembering:
 - The demo base is *sited* so the `n1=211` rung is visible (1.80 m of a 2 m
   quantum). At an arbitrary base the error is a uniform draw in [0, 2) m. The
   bound is the claim, not the 1.8.
+- **Deployed configurations are unmeasured.** The config survey covers the
+  example files in the source tree only. What RTKNAVI's GUI selects on a fresh
+  install, what demo5 ships, and what Emlid Reach's web UI configures are all
+  unchecked — and they are what a claim about real receivers would rest on.
 
 ---
 
