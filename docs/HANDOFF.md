@@ -102,6 +102,12 @@ serving, so the page loads, connects, and silently never updates (now
 non-fatal). **Rehearsing a failed start is the outstanding item, and this is
 what it is rehearsing for.**
 
+**Also this session, and unrelated to the screen: the ARM offsets are done.**
+`offsetof(sta_t,pos)` is 464 on all six ABIs checked, so `n1=211` is not an
+x86-64 number. Full account under "Next steps" item 1, which is where completed
+research items are recorded, and the authoritative version is in
+`research/README.md` under "The payload length transfers unchanged".
+
 ## 2026-07-27: two claims tightened ahead of disclosure
 
 Both were things already in writing that would not have survived contact with
@@ -439,7 +445,7 @@ serial. Full plan, both paths, and the hardware list in
 
 ## Commits, most recent session first
 
-**2026-07-27, later session.** Four commits, `fe9aab3..846ff4a`, and the first
+**2026-07-27, later session.** Seven commits, `fe9aab3..238fa57`, and the first
 push since 2026-07-19 — `origin/master` had been 27 commits behind and is now
 current.
 
@@ -449,6 +455,9 @@ current.
 | `441ead9` | **corrected** the claim that the talk-outline commit had been public for eight days — it was never pushed. The reword still happened, for tone rather than exposure |
 | `c20ba39` | repaired the commit hashes the reword moved, same as `b1f69a2` before it |
 | `846ff4a` | stopped reproducing the reworded remark in the course of explaining it — the correction had reintroduced the thing it was correcting |
+| `54415a8` | replaced this section's "files changed, UNCOMMITTED" predecessor with a commit table, once there were commits to record |
+| `2d98bd4` | committed the stage fallback recording, cropped at both ends only — it had lived solely on the WSL virtual disk, which is the worst possible home for the artifact whose job is to survive things going wrong |
+| `238fa57` | **`offsetof(sta_t,pos)` measured across six ABIs — 464 on all of them**, so the payload lengths are not x86-64 numbers. Closes the last open item in "which builds are affected" |
 
 Files in `fe9aab3`: `research/demo_view.py` and `research/demo_view.html` new;
 `loop_demo.sh` (SERIAL2 + stream rates, truncate the viewer-visible logs up
