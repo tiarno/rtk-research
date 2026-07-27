@@ -6,3 +6,7 @@
 *.c    text eol=lf
 *.h    text eol=lf
 *.md   text eol=lf
+
+# Recorded demo frames: data, not source. No line-ending translation, and no
+# attempt to diff or merge 2400 lines of JSON.
+*.jsonl -text -diff -merge
