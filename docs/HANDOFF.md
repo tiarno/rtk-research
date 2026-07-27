@@ -440,7 +440,7 @@ even though both are additive.
 
 ## Commits, most recent session first
 
-**2026-07-26, later session.** Eight commits, `3cd70d4..b55a92f`:
+**2026-07-26, later session.** Eight commits, `3cd70d4..21dc20c`:
 
 | commit | what |
 |---|---|
@@ -450,8 +450,8 @@ even though both are additive.
 | `5f82c3e` | moved the demo to `n1=211` at a base sited to make it visible; control 0.03 m, attacked 1.39 m |
 | `5ad69c4` | doc consistency pass — two claims this session falsified were corrected in every document, not just where they originated |
 | `181f6e7` | measured the vertical: a 1.12 m height lie moved the aircraft 0.04 m, because the baro outvotes it. The axis with a redundant sensor resisted |
-| `1d5645f` | the talk outline, the conducted-RF delivery plan, and the hardware list |
-| `b55a92f` | surfaced the provenance tooling — `check_fork.sh`, `check_binary.sh`, `check_image.sh`, `pick_base.py` — so the Emlid/Debian/Navio claims are re-runnable rather than asserted |
+| `5ddfcdf` | the talk outline, the conducted-RF delivery plan, and the hardware list |
+| `21dc20c` | surfaced the provenance tooling — `check_fork.sh`, `check_binary.sh`, `check_image.sh`, `pick_base.py` — so the Emlid/Debian/Navio claims are re-runnable rather than asserted |
 
 **2026-07-26, earlier session.** *(These two were originally recorded here as
 `e973bdd` and `5b9a0f5`, which are not in the repo — the branch was rebased
