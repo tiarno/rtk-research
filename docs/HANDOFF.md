@@ -150,14 +150,26 @@ whether or not this repo is public. Held back from it: the four-rung magnitude
 behaviour and the `n1=211` universal bound, the clamp (belongs in the PR), the
 misalignment defect (belongs in its own issue), and Emlid entirely.
 
-**Repo visibility.** Public 2026-07-19 to 2026-07-27, now private. Two things
-follow. Priority no longer rests on the repo — it rests on the #799 comment,
-which is why that was written to stand alone. And while it is private there is
-a clean window to rewrite `1d5645f`, whose commit body contains "is the thing
-FuzzingLabs cannot match" — public for eight days, almost certainly never
-cloned, so a rebase would genuinely remove it rather than leaving it reachable
-by SHA. Cost is the hash references in the commit table below, which have been
-repaired once already (`b1f69a2`).
+**Repo visibility.** Public 2026-07-19 to 2026-07-27, now private. Priority no
+longer rests on the repo — it rests on the #799 comment, which is why that was
+written to stand alone.
+
+> **Corrected 2026-07-27.** An earlier version of this paragraph said the
+> talk-outline commit had been "public for eight days, almost certainly never
+> cloned", and treated the private window as a chance to rewrite it before
+> anyone pulled it. That was wrong on the facts. `origin/master` was at
+> `aa20a26` (2026-07-19) with **the local branch 27 commits ahead**: that
+> commit was on no remote branch and had never been pushed, so it was never
+> public and nothing could have cloned it. What *was* public for those eight
+> days is everything up to `aa20a26` and nothing after.
+>
+> The reason to reword it is therefore not exposure but tone. The body said
+> the methodology section "is the thing FuzzingLabs cannot match" — a
+> competitive dig at the researchers this work credits in §11 and is currently
+> in coordinated disclosure with. That reason stands on its own, and rewriting
+> unpushed history costs nothing. Deliberately not referring to either commit
+> by hash here: the reword changes them, and stale hashes in this file have
+> had to be repaired twice already.
 
 **The patch is written and verified but deliberately not filed.** `check_clamp.sh`
 measures it: benign streams byte-identical, all three attack variants left at
