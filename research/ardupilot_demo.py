@@ -204,6 +204,11 @@ def main():
         print("could not read hold position -- aborting")
         return 1
     hold_lat, hold_lon = hold
+    # Printed in the same shape as the `waypoint:` line below, for the same
+    # reason: it is chosen at runtime, and demo_view.py needs it to pin the
+    # commanded hold point on the map. Without a fixed reference marker the
+    # two icons separating is unreadable -- you cannot tell which one moved.
+    print(f"hold: {hold_lat:.9f},{hold_lon:.9f}")
 
     print(f"\nphase 1: clean GPS, holding {args.hold:.0f}s in GUIDED")
     v.goto(hold_lat, hold_lon, TAKEOFF_ALT)

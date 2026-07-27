@@ -43,6 +43,13 @@ T="${T:-/tmp/rtk-loop}"
 TRIG="$T/attack.go"         # flight driver -> relay: "phase 1 is over"
 mkdir -p "$T"
 rm -f "$TRIG"
+# Truncate the logs demo_view.py reads BEFORE anything else starts. Each is
+# otherwise truncated only when its own stage begins, which leaves a window in
+# which a viewer already running tails the PREVIOUS run to its end and shows
+# phase 3 with the attack armed while this run is still compiling. A screen
+# that says "attacking" when nothing is attacking is the exact failure the
+# control run exists to catch; do not let the visualisation reintroduce it.
+: > "$T/flight.log"; : > "$T/relay.log"; : > "$T/rtklib.log"
 export LIBC_FATAL_STDERR_=1
 
 # Sited so the n1=211 truncation is visible. The error at that length is
@@ -123,6 +130,11 @@ SR1_POSITION 10
 SR1_EXTRA1 10
 SR1_EXTRA3 10
 SR1_EXT_STAT 10
+SERIAL2_PROTOCOL 2
+SR2_POSITION 10
+SR2_EXTRA1 10
+SR2_EXTRA3 10
+SR2_EXT_STAT 10
 EOF
 
 AP_DEF="$HOME/ardupilot/Tools/autotest/default_params/copter.parm"
@@ -172,8 +184,13 @@ echo "### 4. SITL, taking its GPS from RTKLIB ###"
 # the position feed and the flight driver sharing :5760 means whichever
 # connects second gets EOF -- which looks exactly like a vehicle that will not
 # arm. The feed gets SERIAL1, the flight driver keeps SERIAL0.
+# SERIAL2 (:5763) is a third, independent MAVLink endpoint for demo_view.py to
+# read ground truth from. A separate endpoint rather than a shared one for the
+# reason SERIAL1 exists at all: these are single-client TCP sockets, so two
+# consumers on one port means whichever connects second gets EOF. Nothing
+# connects to it unless the viewer is running, and the viewer only ever reads.
 "$BIN" --model quad --home "$HOME_LLH,0" --defaults "$DEFAULTS" \
-       --serial0 tcp:5760 --serial1 tcp:5762 \
+       --serial0 tcp:5760 --serial1 tcp:5762 --serial2 tcp:5763 \
        --serial3 tcpclient:127.0.0.1:5903 \
        > "$T/sitl.log" 2>&1 &
 sleep 12
@@ -187,7 +204,11 @@ echo
 echo "### flying ###"
 # --no-glitch: the offset must reach the aircraft only through the corrupted
 # base coordinate, so the flight driver injects nothing of its own.
-python3 "$HERE/ardupilot_demo.py" --conn tcp:127.0.0.1:5760 --no-glitch \
+# -u: stdout here is a pipe into tee, so it is block-buffered at 8 KB and
+# flight.log lags the flight by minutes. demo_view.py tails it for the phase
+# transitions and the runtime-chosen hold and waypoint coordinates, all of
+# which are worthless late.
+python3 -u "$HERE/ardupilot_demo.py" --conn tcp:127.0.0.1:5760 --no-glitch \
         --trigger-file "$TRIG" \
         --hold 25 --attack 40 --goto-time 55 2>&1 | tee "$T/flight.log" | tail -20
 

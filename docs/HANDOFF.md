@@ -2,6 +2,106 @@
 
 **Session date:** 2026-07-27
 
+## 2026-07-27, later: the demo has a screen
+
+The visual build is done and verified against a live run — `demo_view.py`
+collects and serves, `demo_view.html` draws. Two panes, because the demo spans
+25:1 in scale and one frame cannot hold it: 50 m wide for the 30 m waypoint
+leg, 6 m detail for the metre that actually matters. A persistent **RTK FIXED**
+badge, and a mechanism panel on `M` that stays hidden through the cold open.
+Neither pane ever moves or rescales — a frame that shifts mid-sentence is worse
+than a small icon — so when truth leaves the detail frame during the transit it
+gets an edge marker rather than a rescale. `Space` freezes the screen, which
+§12 needs: the badge goes red on a stalled feed a second after the chain stops,
+and the close depends on it still being green.
+
+**Everything it reads is a passive tap, which is defensible rather than merely
+convenient.** The GPS-claimed position and the fix flag come off :5903 as a
+*second client* of RTKLIB's own NMEA server: `stream.c:178` gives `tcpsvr`
+`MAXCLI=32` slots and `writetcpsvr()` fans every write out to all of them, so
+the screen shows the exact bytes the flight controller is being fed and not a
+re-derivation of them. Truth comes from a third MAVLink endpoint (SERIAL2,
+:5763) — a separate socket, for the same reason SERIAL1 exists. Everything else
+is read from logs the chain already writes.
+
+Two things in RTKLIB's source shaped the design. `send_nb()` returns −1 on a
+*short* write and `writetcpsvr()` answers that by dropping the client, so a
+viewer that stops reading fast enough is disconnected without a word and the
+map freezes while the aircraft keeps flying; the socket read is therefore its
+own thread that does nothing but buffer, and it reconnects. And **HDOP must
+never go on screen**: `outnmea_gga()` declares `double dop=1.0` and never
+assigns to it, so an unchanging HDOP is a property of RTKLIB's writer rather
+than evidence about the attack. Satellite count and correction age are real.
+
+**The recorded fallback is free, and it is not a video.** Every live run writes
+10 Hz state frames to `$T/view.jsonl`; `--replay` plays them back through the
+same renderer. Identical pixels, rehearsable without booting SITL, and no
+editing step to get wrong.
+
+**A defect worth recording, because it produced exactly the display this
+project exists to distrust.** The first collector run showed *phase 3, attack
+armed* before the aircraft had booted. Each log is truncated only when its own
+stage begins, so a viewer already running tails the *previous* run all the way
+to its end — an attack-shaped screen with no attack present, which is the
+fourth time something in this harness has managed that. `loop_demo.sh` now
+truncates the viewer-visible logs before anything else starts, and the
+collector clears the state derived from a file when it sees that file
+truncated.
+
+Three runs in total. One attacked run while building it, which is where the
+base-position tap and the FIXED badge were first confirmed against live data.
+Then, deliberately and in the right order, **a control run and an attacked
+run**, with the screen read against `parse_sitl_log.py` on each — the table
+below is that pair. (An earlier version of this section said the control had
+not been run. True when written, and then it was; the table is the correction.)
+
+| | control (`0`) | attacked (`211`) |
+|---|---|---|
+| gap on screen | 0.01–0.03 m | 1.38–1.42 m |
+| base coordinate | `-3978243.8000`, moved 0.000 m | `-3978242.0000`, moved **1.800 m** |
+| 1033 injected | 0 | 434 |
+| badge | RTK FIXED throughout | RTK FIXED throughout, held 159 s |
+| parser: waypoint miss | **0.04 m** | **1.37 m** |
+| parser: displacement | — | 1.36 m opposite, residual 0.05 m |
+| parser: vertical | — | 0.04 m against a 1.12 m lie |
+
+The control reported *no sustained divergence* — which is the result that makes
+the attacked run mean anything, and it is also what confirms both taps are
+honest rather than decorative. These agree with the figures already recorded;
+they are a reproduction, not a new measurement, so there is nothing here to
+requote.
+
+Harness changes are all additive. SERIAL2 and its stream rates are wiring, the
+same category as everything else `loop.parm` sets, not tuning — worth knowing
+because "why is that set?" is a question this demo has to survive.
+`setvbuf(stdout, _IOLBF)` in `e2e_harness.c` and `python3 -u` on the flight
+driver both exist because stdout to a file or a pipe is block-buffered at 4–8 KB
+and the interesting lines are sparse: the base-position line prints *once* per
+attack and would otherwise sit unflushed for minutes. Plus a status thread in
+`inject_relay.py` for the live injection count, and one `hold:` print so the map
+has a fixed reference marker — without one, two icons separating is unreadable,
+because you cannot tell which of them moved.
+
+**The control run found a defect in the screen, which is the point of running
+it.** The relay tile read "RTCM frames forwarded **0**": with `LEN=0` there is
+no splicer at all, so nothing counts frames while bytes flow perfectly. A zero
+there, during the one beat whose whole claim is *"the chain is working and
+nothing is happening"*, reads as a dead chain. The tile now shows bytes
+relayed, which exists on both paths, and `inject_relay.py` runs its status
+thread on the control path too. Deliberately *not* fixed by giving the control
+run a splicer: that would make it frame-parse and reassemble the stream instead
+of passing bytes through, which changes what the control measures.
+
+**Three ways the chain can be down while the screen looks plausible** — all
+found this session, all now either fixed or instrumented. A stale log tailed
+from a previous run (fixed: truncate up front, reset on truncation). A wrong
+`--scratch` path, where position and fix quality still arrive over TCP so the
+screen looks alive while everything log-derived stays blank (now warns by
+name). And the frame pump dying in its thread while the HTTP server keeps
+serving, so the page loads, connects, and silently never updates (now
+non-fatal). **Rehearsing a failed start is the outstanding item, and this is
+what it is rehearsing for.**
+
 ## 2026-07-27: two claims tightened ahead of disclosure
 
 Both were things already in writing that would not have survived contact with
@@ -97,6 +197,10 @@ Nothing is blocked.
 claimed is measured, every document agrees, and the demo runs on a length that
 generalises. What is missing is the visual build — map, two icons, a persistent
 FIXED indicator — and a rehearsal.
+
+> The visual build was done later the same day and verified against a live run
+> — see "the demo has a screen" at the top of this file. **The rehearsal is
+> still outstanding**, and on current state it is the binding constraint.
 
 The one thing to carry forward: **run `./loop_demo.sh 0` before quoting any
 closed-loop number.** Three harness defects have produced attack-shaped results
@@ -305,6 +409,23 @@ TDL450, Satel 4Pro) are a different animal: GMSK/4FSK, 403–473 MHz, transparen
 serial. Full plan, both paths, and the hardware list in
 [talk-outline.md](talk-outline.md#8-delivering-it-over-the-air).
 
+## Files changed, 2026-07-27 later session — UNCOMMITTED
+
+Two new, six modified. Nothing committed; the changes to `e2e_harness.c` and
+`loop_demo.sh` touch the measurement path and should be read before they go in,
+even though both are additive.
+
+| file | change |
+|---|---|
+| `research/demo_view.py` | **new** — collector: NMEA tap, truth tap, log tails, 10 Hz state frames, SSE server, JSONL recording, `--replay` |
+| `research/demo_view.html` | **new** — renderer: two plan views, FIXED badge, mechanism panel, freeze, off-frame marker. Self-contained, no CDN |
+| `research/loop_demo.sh` | `--serial2 tcp:5763` + `SERIAL2_PROTOCOL`/`SR2_*` for the truth tap; truncate `flight/relay/rtklib.log` up front; `python3 -u` on the flight driver |
+| `research/e2e_harness.c` | `setvbuf(stdout, NULL, _IOLBF, 0)` so the base-position line reaches disk when it is written, not 4 KB later |
+| `research/inject_relay.py` | `report()` status thread on both the injecting and the passthrough path; reports bytes, which is the count that exists either way |
+| `research/ardupilot_demo.py` | print `hold: lat,lon` so the map can pin the commanded hold point |
+| `docs/HANDOFF.md` | this section, the demo section at the top, Key Parameters rows, the WSL session trap |
+| `docs/talk-outline.md` | checklist ticked, §0 cold-open note, §7 "what is on the screen", §12 freeze, fallback-truncation warning |
+
 ## Commits, most recent session first
 
 **2026-07-26, later session.** Eight commits, `3cd70d4..b55a92f`:
@@ -355,6 +476,12 @@ Committed in `034d8a7` (the stock-parameter demo):
 | ArduPilot SITL | `~/apsitl/arducopter` (prebuilt ArduCopter 4.7.0) |
 | run command | `RTKLIB=/home/tim/RTKLIB BIN=/home/tim/apsitl/arducopter bash ./loop_demo.sh` from `/mnt/c/Users/tim/work/rtk/research` in WSL Ubuntu — `LEN` now defaults to 211 |
 | control run | the same with `0` — injection disabled. Run it *first*; it should land within centimetres (last: 0.03 m) |
+| demo screen | `python3 demo_view.py` from `research/` in WSL, **started before the run**; open `http://localhost:8080/` in a browser on the Windows side (WSL localhost forwarding is verified working). Keys: `Space` freeze, `M` mechanism panel, `T` trails, `F` fullscreen, `R` reset trails |
+| screen, for §12 | `Space` freezes the last frame and stops accepting new ones. Hit it *before* the run ends: a second after the chain stops the badge correctly goes red on a stalled feed, and the close needs the indicator still green |
+| screen, gotcha | the "held for N s" counter starts when the *page* connects, not when the fix did, so a late page load understates it. Open the page first |
+| recorded fallback | `python3 demo_view.py --replay /tmp/rtk-loop/view.jsonl` — every live run records one automatically. Same renderer, so it is the demo played back rather than a video |
+| **fallback, before travelling** | `view.jsonl` is **truncated at the start of every run**, so the fallback is destroyed by the first live attempt at the venue. Copy a known-good one somewhere durable and point `--replay` at *that*: `cp /tmp/rtk-loop/view.jsonl ~/stage-fallback.jsonl`. Verified good one recorded 2026-07-27 (4142 frames, control 0.0x m, attacked 1.40 m, base delta 1.800 m) |
+| leaving it up | the viewer survives between runs: it detects each log being truncated and clears the state derived from it. Start it once, re-run `loop_demo.sh` as often as needed |
 | latency probe | `RTKLIB=/home/tim/RTKLIB bash ./loop_latency.sh 90` — no vehicle, prints the loop delay |
 | `LEN` | **211** — the rung that generalises: a 2 m quantum, so bounded error against any base. 212 was a 512 m quantum that happened to land on 2.4 m against the old base |
 | vertical | measured, and it is a **negative**: a 1.12 m height lie moved the aircraft 0.04 m, because EKF3 takes height from the baro (`EK3_SRC1_POSZ`). Control step 0.000 m. The attack is horizontal-only on this airframe |
@@ -366,14 +493,26 @@ Committed in `034d8a7` (the stock-parameter demo):
 | base ECEF | `-3978243.8000,3382841.1715,3649902.7667` — sited 1.80 m above the 2 m lattice point so `n1=211` is visible. Not `-3978243.9998`: 0.2 mm from the boundary would collapse to ~0 under any sub-mm shift. The old `-3978242.4348` gives 0.43 m at 211 |
 | scratch | `/tmp/rtk-loop` (logs: `sim.log`, `relay.log`, `rtklib.log`, `mavpos.log`, `sitl.log`, `flight.log`) |
 
-Two environment traps worth remembering:
+Environment traps worth remembering:
 
 - `pkill -f <pattern>` matches the invoking `bash -lc '...'` command line
   itself if the pattern appears in it, so an ad-hoc cleanup command can kill its
-  own shell and exit silently.
+  own shell and exit silently. Hit again this session.
 - `$VAR` does not survive `wsl.exe -- bash -lc '...'` from Git Bash. Use
   explicit paths or a script file, and `MSYS_NO_PATHCONV=1` for `/mnt/...`
   arguments.
+- **WSL tears the VM down when the last session closes, killing anything
+  started in it.** This is what makes "start the viewer in one window, the run
+  in another" fail: the viewer dies seconds later and the browser reports
+  connection refused, which looks like a network or IPv6 problem and is not.
+  It also silently killed a `loop_demo.sh` run mid-flight earlier the same day.
+  **Start the collector and the run from the same shell** — `demo_view.py ... &`
+  followed by `loop_demo.sh` — or from one script. Once a collector genuinely
+  is up, both `localhost:8080` and `127.0.0.1:8080` are reachable from the
+  Windows side; that crossing was never the problem.
+- `nohup ... &` inside a one-shot `wsl.exe -- bash -lc` does not reliably
+  survive either, for the same reason. Run the thing in the foreground of a
+  session that stays open.
 
 ## Standing caveats
 

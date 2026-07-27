@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RTK demo view</title>
+<style>
+  :root {
+    --bg:#0b0e13; --panel:#121721; --edge:#222b3a;
+    --grid:#1a2231; --grid-major:#2b3648;
+    --text:#e6edf7; --muted:#7d8da5; --dim:#4a586e;
+    --truth:#ffb340; --gps:#4dd2ff;
+    --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+  }
+  * { box-sizing:border-box; }
+  html, body {
+    height:100%; margin:0; background:var(--bg); color:var(--text);
+    font-family:"Segoe UI", system-ui, -apple-system, sans-serif;
+    overflow:hidden;
+  }
+  body { display:flex; flex-direction:column; }
+  .num { font-variant-numeric:tabular-nums;
+         font-family:"Cascadia Mono", Consolas, ui-monospace, monospace; }
+
+  /* ---- top bar: the two things that must read from the back of a room ---- */
+  header {
+    display:flex; align-items:stretch; gap:1px;
+    background:var(--edge); border-bottom:1px solid var(--edge);
+    flex:0 0 auto;
+  }
+  .cell { background:var(--panel); padding:0.5rem 1.1rem; display:flex;
+          flex-direction:column; justify-content:center; }
+  .cell .label { font-size:0.72rem; letter-spacing:0.16em; color:var(--muted);
+                 text-transform:uppercase; }
+  .cell .value { font-size:1.9rem; font-weight:600; line-height:1.15; }
+
+  #badge { flex:0 0 auto; align-items:flex-start; }
+  #badge .value {
+    font-size:clamp(1.8rem, 3.6vw, 3.4rem); font-weight:800;
+    letter-spacing:0.02em; line-height:1;
+  }
+  #badge.good .value { color:var(--good); text-shadow:0 0 26px rgba(34,197,94,.45); }
+  #badge.warn .value { color:var(--warn); }
+  #badge.bad  .value { color:var(--bad); }
+  #badge .sub { font-size:0.8rem; color:var(--muted); margin-top:0.3rem; }
+
+  #gap { flex:0 0 auto; }
+  #gap .value { font-size:clamp(1.8rem, 3.6vw, 3.4rem); font-weight:800;
+                color:var(--truth); line-height:1; }
+  #phase { flex:1 1 auto; }
+  #phase .value { font-size:clamp(1rem, 1.6vw, 1.5rem); font-weight:600; }
+  #phase .value.armed { color:var(--bad); }
+
+  /* ---- the two plan views ---- */
+  main { flex:1 1 auto; display:flex; gap:1px; background:var(--edge);
+         min-height:0; }
+  .pane { position:relative; background:var(--panel); min-width:0; }
+  .pane.wide { flex:1.35 1 0; }
+  .pane.detail { flex:1 1 0; }
+  .pane canvas { position:absolute; inset:0; width:100%; height:100%; }
+  .pane .title {
+    position:absolute; top:0.7rem; left:0.9rem; z-index:2;
+    font-size:0.72rem; letter-spacing:0.18em; text-transform:uppercase;
+    color:var(--muted); pointer-events:none;
+  }
+  .pane .title b { color:var(--text); font-weight:600; }
+
+  /* ---- mechanism panel, hidden for the cold open ---- */
+  #mech {
+    flex:0 0 auto; display:none; gap:1px; background:var(--edge);
+    border-top:1px solid var(--edge);
+  }
+  #mech.on { display:flex; }
+  #mech .cell { flex:1 1 0; }
+  #mech .value { font-size:1.35rem; }
+  #mech .value small { font-size:0.85rem; color:var(--muted); font-weight:400; }
+  .changed { color:var(--bad) !important; }
+  .was { font-size:0.8rem; color:var(--dim); }
+
+  footer {
+    flex:0 0 auto; display:flex; justify-content:space-between;
+    padding:0.35rem 1rem; font-size:0.75rem; color:var(--dim);
+    background:var(--panel); border-top:1px solid var(--edge);
+  }
+  .stale { color:var(--bad); }
+  #frozen { color:var(--warn); font-weight:700; letter-spacing:0.1em; }
+  kbd { background:#1b2432; border:1px solid var(--edge); border-radius:3px;
+        padding:0 0.3rem; color:var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="cell" id="badge">
+    <div class="label">GPS reported quality</div>
+    <div class="value">--</div>
+    <div class="sub" id="badgeSub">waiting for the chain</div>
+  </div>
+  <div class="cell" id="gap">
+    <div class="label">Truth vs. GPS-claimed</div>
+    <div class="value num">--</div>
+  </div>
+  <div class="cell" id="phase">
+    <div class="label">Flight</div>
+    <div class="value">waiting</div>
+  </div>
+</header>
+
+<main>
+  <div class="pane wide">
+    <div class="title">Wide &mdash; <b id="wideSpan">50 m</b> across</div>
+    <canvas id="cw"></canvas>
+  </div>
+  <div class="pane detail">
+    <div class="title">Detail &mdash; <b id="detSpan">6 m</b> across, centred on
+      <b>where the GPS says it is</b></div>
+    <canvas id="cd"></canvas>
+  </div>
+</main>
+
+<div id="mech">
+  <div class="cell">
+    <div class="label">Base coordinate RTKLIB adopted (ECEF X)</div>
+    <div class="value num" id="baseX">--</div>
+    <div class="was num" id="baseWas"></div>
+  </div>
+  <div class="cell">
+    <div class="label">Base moved</div>
+    <div class="value num" id="baseDelta">--</div>
+  </div>
+  <div class="cell">
+    <div class="label">Type 1033 injected</div>
+    <div class="value num" id="injected">0</div>
+  </div>
+  <div class="cell">
+    <div class="label">Correction stream relayed</div>
+    <div class="value num" id="frames">0</div>
+  </div>
+  <div class="cell">
+    <div class="label">Satellites / correction age</div>
+    <div class="value num" id="sats">-- <small>/ --</small></div>
+  </div>
+</div>
+
+<footer>
+  <span><span id="frozen" style="display:none">FROZEN &nbsp;&middot;&nbsp; </span
+        ><span id="status">connecting&hellip;</span></span>
+  <span><kbd>Space</kbd> freeze &nbsp; <kbd>M</kbd> mechanism &nbsp;
+        <kbd>T</kbd> trails &nbsp; <kbd>F</kbd> fullscreen &nbsp;
+        <kbd>R</kbd> reset trails</span>
+</footer>
+
+<script>
+"use strict";
+
+// Same projection constant as parse_sitl_log.py and sign_check.py, so a number
+// read off this screen matches the one the post-hoc parser prints.
+const M_PER_DEG = 111320.0;
+
+const WIDE_SPAN = 50;      // metres across the wide pane
+const DETAIL_SPAN = 6;     // metres across the detail pane
+// 10 Hz frames. loop_demo.sh runs 260 s, so anything shorter than this drops
+// the earlier part of the flight path before the run is over -- the 30 m leg
+// would erase itself while it is still being talked about.
+const TRAIL_MAX = 3200;
+
+const PHASES = {
+  startup: "waiting for the chain",
+  clean:   "PHASE 1 — clean corrections, holding",
+  attack:  "PHASE 2 — correction stream compromised",
+  goto:    "PHASE 3 — navigating to a waypoint",
+  land:    "landing",
+};
+
+let frame = null;          // latest state frame
+let origin = null;         // {lat, lon} projection origin, pinned once
+let trails = { truth: [], gps: [] };
+let showTrails = true;
+let lastT = -1;
+let detCentre = null;      // eased centre of the detail pane
+// Freeze holds the last frame and stops accepting new ones. The close of the
+// talk calls back to the cold open with the aircraft off target and the
+// indicator STILL GREEN -- but a couple of seconds after the chain stops the
+// badge correctly goes red on a stalled feed, which destroys exactly that
+// image. Freeze before the run ends and the frame keeps for as long as needed.
+let frozen = false;
+
+// --- projection ------------------------------------------------------------
+function toNE(p) {
+  if (!p || !origin) return null;
+  return {
+    n: (p.lat - origin.lat) * M_PER_DEG,
+    e: (p.lon - origin.lon) * M_PER_DEG * Math.cos(origin.lat * Math.PI / 180),
+  };
+}
+
+// --- canvas helpers --------------------------------------------------------
+function fit(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const r = canvas.getBoundingClientRect();
+  const w = Math.max(1, Math.round(r.width * dpr));
+  const h = Math.max(1, Math.round(r.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w: r.width, h: r.height };
+}
+
+function gridStep(scale) {
+  // Smallest step from the ladder that keeps grid lines at least 80 px apart.
+  // 80 rather than something tighter on purpose: it puts a 1 m grid in the
+  // detail pane and a 5 m grid in the wide one, so the scale bar reads a
+  // number somebody can hold in their head. A 0.25 m grid is technically
+  // finer and communicates nothing from the back of a room.
+  for (const s of [0.25, 0.5, 1, 2, 5, 10, 25, 50]) {
+    if (s * scale >= 80) return s;
+  }
+  return 100;
+}
+
+function drawGrid(ctx, w, h, centre, scale) {
+  const step = gridStep(scale);
+  const halfW = w / 2 / scale, halfH = h / 2 / scale;
+  const e0 = Math.ceil((centre.e - halfW) / step) * step;
+  const n0 = Math.ceil((centre.n - halfH) / step) * step;
+  ctx.lineWidth = 1;
+  for (let e = e0; e <= centre.e + halfW; e += step) {
+    const x = w / 2 + (e - centre.e) * scale;
+    ctx.strokeStyle = Math.abs(e) < step / 4 ? "#2b3648" : "#1a2231";
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  for (let n = n0; n <= centre.n + halfH; n += step) {
+    const y = h / 2 - (n - centre.n) * scale;
+    ctx.strokeStyle = Math.abs(n) < step / 4 ? "#2b3648" : "#1a2231";
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+  return step;
+}
+
+function drawScaleBar(ctx, w, h, scale, step) {
+  const len = step * scale;
+  const x = 18, y = h - 24;
+  ctx.strokeStyle = "#7d8da5"; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, y - 5); ctx.lineTo(x, y); ctx.lineTo(x + len, y);
+  ctx.lineTo(x + len, y - 5);
+  ctx.stroke();
+  ctx.fillStyle = "#7d8da5";
+  ctx.font = "12px ui-monospace, Consolas, monospace";
+  ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+  ctx.fillText(step >= 1 ? step + " m" : step.toFixed(2) + " m", x, y - 8);
+}
+
+function drawNorth(ctx, w) {
+  const x = w - 26, y = 30;
+  ctx.strokeStyle = "#4a586e"; ctx.fillStyle = "#4a586e"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x, y + 14); ctx.lineTo(x, y - 10); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, y - 16); ctx.lineTo(x - 5, y - 6); ctx.lineTo(x + 5, y - 6);
+  ctx.closePath(); ctx.fill();
+  ctx.font = "11px ui-monospace, Consolas, monospace";
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillText("N", x, y + 16);
+}
+
+function px(w, h, centre, scale, p) {
+  return { x: w / 2 + (p.e - centre.e) * scale,
+           y: h / 2 - (p.n - centre.n) * scale };
+}
+
+function drawTrail(ctx, w, h, centre, scale, all, colour, maxPts) {
+  if (!showTrails || all.length < 2) return;
+  // The detail pane passes a short tail. Drawing the full history there means
+  // the 30 m transit is rendered inside a 6 m frame: streaks that run off the
+  // edges and tell you nothing about the metre that matters.
+  const pts = maxPts && all.length > maxPts ? all.slice(-maxPts) : all;
+  ctx.lineWidth = 2; ctx.lineJoin = "round";
+  for (let i = 1; i < pts.length; i++) {
+    const a = px(w, h, centre, scale, pts[i - 1]);
+    const b = px(w, h, centre, scale, pts[i]);
+    ctx.globalAlpha = 0.08 + 0.5 * (i / pts.length);
+    ctx.strokeStyle = colour;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Label offsets are staggered per marker kind on purpose: when the attack is
+// working, the GPS icon sits exactly on the commanded point, so their labels
+// land on top of each other precisely at the moment they matter most.
+const LABEL_DY = { gps: -15, truth: 0, square: 15, diamond: 15 };
+
+function drawMarker(ctx, p, kind, colour, label) {
+  ctx.strokeStyle = colour; ctx.fillStyle = colour; ctx.lineWidth = 2;
+  if (kind === "square") {                       // commanded hold point
+    ctx.strokeRect(p.x - 7, p.y - 7, 14, 14);
+  } else if (kind === "diamond") {               // commanded waypoint
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y - 9); ctx.lineTo(p.x + 9, p.y);
+    ctx.lineTo(p.x, p.y + 9); ctx.lineTo(p.x - 9, p.y);
+    ctx.closePath(); ctx.stroke();
+  } else if (kind === "gps") {                   // where it CLAIMS to be
+    ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(p.x - 14, p.y); ctx.lineTo(p.x - 4, p.y);
+    ctx.moveTo(p.x + 4, p.y); ctx.lineTo(p.x + 14, p.y);
+    ctx.moveTo(p.x, p.y - 14); ctx.lineTo(p.x, p.y - 4);
+    ctx.moveTo(p.x, p.y + 4); ctx.lineTo(p.x, p.y + 14);
+    ctx.stroke();
+  } else if (kind === "truth") {                 // where it ACTUALLY is
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.25;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  if (label) {
+    ctx.font = "600 12px 'Segoe UI', system-ui, sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(label, p.x + 18, p.y + (LABEL_DY[kind] || 0));
+  }
+}
+
+function drawOffFrame(ctx, w, h, p, metres) {
+  const cx = w / 2, cy = h / 2;
+  const m = 26;
+  const x = Math.max(m, Math.min(w - m, p.x));
+  const y = Math.max(m, Math.min(h - m, p.y));
+  const ang = Math.atan2(p.y - cy, p.x - cx);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(ang);
+  ctx.fillStyle = "#ffb340";
+  ctx.beginPath();
+  ctx.moveTo(13, 0); ctx.lineTo(-7, -9); ctx.lineTo(-7, 9);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = "#ffb340";
+  ctx.font = "600 12px 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = x > w - m * 2 ? "right" : "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText("actually here — " + metres.toFixed(2) + " m off frame",
+               x + (x > w - m * 2 ? -20 : 20), y);
+}
+
+function drawGapLine(ctx, a, b, metres) {
+  ctx.save();
+  ctx.strokeStyle = "#e6edf7"; ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  ctx.setLineDash([]);
+  if (metres === null) { ctx.restore(); return; }
+  // Offset the label along the normal to the line, not straight up: when the
+  // two icons are close together (which is the whole of phase 2) a vertical
+  // offset drops the text on top of the GPS crosshair.
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const off = 22;
+  const mx = (a.x + b.x) / 2 - (dy / len) * off;
+  const my = (a.y + b.y) / 2 + (dx / len) * off;
+  const text = metres.toFixed(2) + " m";
+  ctx.font = "700 15px ui-monospace, Consolas, monospace";
+  const tw = ctx.measureText(text).width;
+  ctx.fillStyle = "rgba(11,14,19,0.85)";
+  ctx.fillRect(mx - tw / 2 - 6, my - 10, tw + 12, 20);
+  ctx.fillStyle = "#e6edf7";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(text, mx, my);
+  ctx.restore();
+}
+
+// --- the two panes ---------------------------------------------------------
+function drawPane(canvas, centre, span, opts) {
+  const { ctx, w, h } = fit(canvas);
+  ctx.clearRect(0, 0, w, h);
+  if (!centre) {
+    ctx.fillStyle = "#4a586e";
+    ctx.font = "14px 'Segoe UI', system-ui, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("waiting for a position…", w / 2, h / 2);
+    return;
+  }
+  const scale = Math.min(w, h) / span;
+  const step = drawGrid(ctx, w, h, centre, scale);
+
+  const truth = toNE(frame && frame.truth);
+  const gps = toNE(frame && frame.gps);
+  const hold = toNE(frame && frame.hold);
+  const wp = toNE(frame && frame.wp);
+
+  drawTrail(ctx, w, h, centre, scale, trails.truth, "#ffb340", opts.trail);
+  drawTrail(ctx, w, h, centre, scale, trails.gps, "#4dd2ff", opts.trail);
+
+  if (hold) drawMarker(ctx, px(w, h, centre, scale, hold), "square",
+                       "#7d8da5", opts.labels ? "commanded hold" : "");
+  if (wp) drawMarker(ctx, px(w, h, centre, scale, wp), "diamond",
+                     "#7d8da5", opts.labels ? "waypoint" : "");
+
+  if (truth && gps) {
+    const a = px(w, h, centre, scale, gps);
+    const b = px(w, h, centre, scale, truth);
+    const d = Math.hypot(truth.n - gps.n, truth.e - gps.e);
+    // Only the detail pane gets the number. At 50 m across the icons are ~30 px
+    // apart and the label box is wider than the gap it annotates; the header
+    // carries the figure at a size that reads from the back anyway.
+    if (d > 0.05) drawGapLine(ctx, a, b, opts.labels ? d : null);
+  }
+  if (gps) drawMarker(ctx, px(w, h, centre, scale, gps), "gps", "#4dd2ff",
+                      opts.labels ? "GPS claims" : "");
+  if (truth) {
+    const p = px(w, h, centre, scale, truth);
+    if (p.x < 20 || p.x > w - 20 || p.y < 20 || p.y > h - 20) {
+      // Off-frame. The gap is only ~1.4 m during all three beats of the demo,
+      // but it transiently reaches ~3.7 m mid-transit while the aircraft
+      // accelerates and the reported position runs ahead of truth. Rather than
+      // rescale the pane mid-run -- a frame that moves under you is worse than
+      // a small icon -- pin an edge marker so the subject is never simply gone.
+      drawOffFrame(ctx, w, h, p, Math.hypot(truth.n - centre.n,
+                                            truth.e - centre.e));
+    } else {
+      drawMarker(ctx, p, "truth", "#ffb340",
+                 opts.labels ? "actually here" : "");
+    }
+  }
+
+  drawScaleBar(ctx, w, h, scale, step);
+  drawNorth(ctx, w);
+}
+
+function render() {
+  const truth = toNE(frame && frame.truth);
+  const gps = toNE(frame && frame.gps);
+  const hold = toNE(frame && frame.hold);
+  const wp = toNE(frame && frame.wp);
+
+  // Wide pane: fixed frame from the moment the hold point is known. Offset
+  // north so a waypoint 30 m up-range sits inside it without the camera ever
+  // moving -- a frame that shifts mid-sentence is worse than a small icon.
+  let wideCentre = null;
+  if (hold) wideCentre = { n: hold.n + 15, e: hold.e };
+  else if (truth) wideCentre = truth;
+  else if (gps) wideCentre = gps;
+
+  // Detail pane: centred on the GPS-CLAIMED position -- the aircraft's own
+  // belief about where it is. That is steady exactly when it needs to be,
+  // because the attack works by making the aircraft park its believed
+  // position on the commanded point; and unlike centring on the commanded
+  // point it does not go empty during the 30 m transit, when the aircraft is
+  // 15 m from both ends. The amber dot is then, by construction, the lie.
+  // Eased so GPS noise does not make the whole grid shimmer while holding.
+  if (gps) {
+    if (!detCentre) detCentre = { n: gps.n, e: gps.e };
+    else {
+      detCentre.n += (gps.n - detCentre.n) * 0.06;
+      detCentre.e += (gps.e - detCentre.e) * 0.06;
+      // Then clamp the lag. Easing alone is a per-FRAME rate, so how far it
+      // falls behind depends on how fast the world is moving: at 6x replay it
+      // lagged far enough to push the aircraft out of a 6 m frame entirely.
+      // Bounding the offset keeps the pane smooth while holding and makes it
+      // impossible to lose the subject at any speed.
+      const dn = gps.n - detCentre.n, de = gps.e - detCentre.e;
+      const lag = Math.hypot(dn, de), MAX_LAG = DETAIL_SPAN / 5;
+      if (lag > MAX_LAG) {
+        detCentre.n += dn * (1 - MAX_LAG / lag);
+        detCentre.e += de * (1 - MAX_LAG / lag);
+      }
+    }
+  }
+
+  drawPane(document.getElementById("cw"), wideCentre, WIDE_SPAN,
+           { labels: false });
+  drawPane(document.getElementById("cd"), detCentre || truth, DETAIL_SPAN,
+           { labels: true, trail: 60 });     // ~6 s of tail at 10 Hz
+}
+
+// --- header + mechanism ----------------------------------------------------
+const QUALITY = {
+  0: ["NO FIX", "bad"], 1: ["SINGLE", "warn"], 2: ["DGPS", "warn"],
+  3: ["PPS", "warn"], 4: ["RTK FIXED", "good"], 5: ["RTK FLOAT", "warn"],
+  6: ["DEAD RECKONING", "bad"],
+};
+let qualitySince = null, qualityValue = null;
+
+function updateHeader() {
+  const badge = document.getElementById("badge");
+  const bv = badge.querySelector(".value");
+  const bs = document.getElementById("badgeSub");
+  const stale = frame && frame.gps_age !== null && frame.gps_age > 2.0;
+
+  if (!frame || !frame.gps) {
+    badge.className = "cell"; bv.textContent = "--";
+    bs.textContent = "waiting for the chain";
+    // No feed means no claim to have been holding: without this the counter
+    // carries a stale start time across a gap and reads 0 s forever after.
+    qualityValue = null; qualitySince = null;
+  } else {
+    const [text, cls] = QUALITY[frame.gps.q] || ["Q=" + frame.gps.q, "warn"];
+    if (frame.gps.q !== qualityValue) {
+      qualityValue = frame.gps.q;
+      qualitySince = frame.t;
+    }
+    badge.className = "cell " + (stale ? "bad" : cls);
+    bv.textContent = stale ? "NO DATA" : text;
+    // How long it has been claiming this is the point of the whole section:
+    // it says FIXED before, during and after the attack.
+    bs.textContent = stale
+      ? "NMEA feed stalled " + frame.gps_age.toFixed(0) + " s"
+      : "held for " + Math.max(0, frame.t - qualitySince).toFixed(0) + " s"
+        + "  ·  " + frame.gps.ns + " sats";
+  }
+
+  const gapEl = document.querySelector("#gap .value");
+  const truth = toNE(frame && frame.truth), gps = toNE(frame && frame.gps);
+  if (truth && gps) {
+    gapEl.textContent = Math.hypot(truth.n - gps.n, truth.e - gps.e).toFixed(2)
+                        + " m";
+    // A live-looking number beside a dead feed is the exact failure mode this
+    // talk is about. Dim it and say so rather than let it read as current.
+    gapEl.style.color = stale ? "var(--dim)" : "var(--truth)";
+    document.querySelector("#gap .label").textContent =
+      stale ? "Truth vs. GPS-claimed (last known)" : "Truth vs. GPS-claimed";
+  } else {
+    gapEl.textContent = "--";
+    gapEl.style.color = "var(--truth)";
+  }
+
+  const ph = document.getElementById("phase").querySelector(".value");
+  ph.textContent = PHASES[(frame && frame.phase) || "startup"] || "--";
+  ph.classList.toggle("armed", !!(frame && frame.armed));
+
+  if (frame) {
+    document.getElementById("injected").textContent = frame.injected || 0;
+    // Bytes, not frames: with the attack off there is no splicer and nothing
+    // counts frames, so a frame count reads as a dead chain during the one
+    // beat whose whole point is that the chain is working and doing nothing.
+    const kb = (frame.relayed || 0) / 1024;
+    document.getElementById("frames").textContent =
+      kb >= 1 ? kb.toFixed(0) + " kB" : (frame.relayed || 0) + " B";
+    // Clear rather than hold on a dead feed. A stale base coordinate left on
+    // screen from the previous replay loop reads as a live attack against an
+    // aircraft that has not taken off yet -- exactly the class of mistake the
+    // control run exists to catch, and it must not be reintroduced by the UI.
+    document.getElementById("sats").innerHTML = frame.gps
+      ? frame.gps.ns + " <small>/ " + frame.gps.age.toFixed(1) + " s</small>"
+      : "--";
+    const bx = document.getElementById("baseX");
+    const bw = document.getElementById("baseWas");
+    const bd = document.getElementById("baseDelta");
+    if (frame.base && frame.base0) {
+      const d = Math.hypot(frame.base.x - frame.base0.x,
+                           frame.base.y - frame.base0.y,
+                           frame.base.z - frame.base0.z);
+      const moved = d > 0.001;
+      bx.textContent = frame.base.x.toFixed(4);
+      bd.textContent = d.toFixed(3) + " m";
+      bw.textContent = moved ? "was " + frame.base0.x.toFixed(4) : "";
+      bx.classList.toggle("changed", moved);
+      bd.classList.toggle("changed", moved);
+    } else {
+      bx.textContent = "--"; bd.textContent = "--"; bw.textContent = "";
+      bx.classList.remove("changed"); bd.classList.remove("changed");
+    }
+  }
+
+  const st = document.getElementById("status");
+  if (!frame) { st.textContent = "waiting for frames…"; return; }
+  const bits = ["t+" + frame.t.toFixed(0) + " s"];
+  if (frame.truth_age === null) bits.push("no truth feed");
+  else if (frame.truth_age > 2) bits.push("truth stale " + frame.truth_age + " s");
+  if (frame.notes && frame.notes.length) bits.push(frame.notes[frame.notes.length - 1]);
+  st.textContent = bits.join("  ·  ");
+  st.classList.toggle("stale", frame.truth_age === null || frame.truth_age > 2);
+}
+
+// --- frame intake ----------------------------------------------------------
+function onFrame(f) {
+  if (frozen) return;
+  // A replay loop restarts the clock; drop the trails so the old run's path
+  // does not smear across the new one.
+  if (f.t < lastT) {
+    trails = { truth: [], gps: [] };
+    origin = null; detCentre = null;
+    qualityValue = null; qualitySince = null;
+  }
+  lastT = f.t;
+  frame = f;
+
+  // Pin the projection origin once, to the commanded hold point if we have it
+  // (so N/E on screen are displacements from where it was told to be).
+  if (!origin) {
+    if (f.hold) origin = { lat: f.hold.lat, lon: f.hold.lon };
+    else if (f.truth) origin = { lat: f.truth.lat, lon: f.truth.lon };
+  }
+  const t = toNE(f.truth), g = toNE(f.gps);
+  if (t) { trails.truth.push(t); if (trails.truth.length > TRAIL_MAX) trails.truth.shift(); }
+  if (g) { trails.gps.push(g); if (trails.gps.length > TRAIL_MAX) trails.gps.shift(); }
+}
+
+function connect() {
+  const es = new EventSource("/stream");
+  es.onmessage = (ev) => { try { onFrame(JSON.parse(ev.data)); } catch (e) {} };
+  es.onerror = () => { document.getElementById("status").textContent =
+                       "stream lost — reconnecting…"; };
+}
+
+function loop() { updateHeader(); render(); requestAnimationFrame(loop); }
+
+document.addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (e.key === " ") {
+    e.preventDefault();
+    frozen = !frozen;
+    document.getElementById("frozen").style.display = frozen ? "" : "none";
+  } else if (k === "m") document.getElementById("mech").classList.toggle("on");
+  else if (k === "t") showTrails = !showTrails;
+  else if (k === "r") trails = { truth: [], gps: [] };
+  else if (k === "f") {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen();
+  }
+});
+
+document.getElementById("wideSpan").textContent = WIDE_SPAN + " m";
+document.getElementById("detSpan").textContent = DETAIL_SPAN + " m";
+connect();
+loop();
+</script>
+</body>
+</html>

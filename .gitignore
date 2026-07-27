@@ -36,3 +36,8 @@ research/harness
 research/*.bin
 research/*.o
 research/trace
+
+# Claude Code: the shared permission policy is tracked, machine-local
+# overrides and backups are not.
+.claude/settings.local.json
+.claude/*.bak-*

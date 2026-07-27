@@ -44,6 +44,11 @@ an unauthenticated broadcast, and the failure is silent by default, not loud.*
 No slides. The demo already running as people settle: a map, two aircraft
 icons, a big green **RTK FIXED** indicator.
 
+The screen is deliberately stripped for this: the mechanism panel — adopted
+base coordinate, injection count — is hidden until you press `M` in §7. A base
+ECEF readout during the cold open *is* an explanation, and the instruction here
+is not to explain yet.
+
 Say only: *"That drone is holding position. Its GPS says it's fixed to the
 centimetre. In about thirty seconds it's going to quietly move a metre and a
 half, and nothing on the screen will change colour."*
@@ -170,9 +175,26 @@ the flight controller's only GPS. Nothing fed in by hand.
 **The line for the hold:** it repositioned to correct a drift that never
 happened.
 
+**What is on the screen, and when:**
+- Left pane 50 m across — carries the 30 m waypoint leg. Right pane 6 m across,
+  centred on where the GPS *claims* to be — carries the metre. Neither pane
+  moves or rescales at any point; the aircraft's true position slides off the
+  centre of the right pane and that displacement is the whole story.
+- Press `M` at the start of this section to reveal the mechanism panel: the base
+  coordinate jumping `-3978243.8000` → `-3978242.0000`, and the 1033 count
+  climbing. That is the cause on screen beside an indicator that never changes.
+- The FIXED badge is the GGA quality field read off the wire, not a graphic.
+  If somebody asks, `nmea_solq[]` in `solution.c` maps `SOLQ_FIX` to 4.
+
 **Staging requirements — do not skip:**
+- Start `demo_view.py` and open the page **before** launching the run. The
+  "held for N s" counter starts when the page connects, and the trails want the
+  whole flight.
 - Pre-build binaries; pre-warm ports; rehearse a *failed* start.
-- Recorded fallback ready, and say so if you use it.
+- Fallback is `--replay` on a recorded run — the same renderer, so it looks
+  identical, which is the point. Say so if you use it. **Copy the recording out
+  of `$T` before you travel:** every run truncates `view.jsonl`, so the first
+  live attempt on stage destroys the fallback you were relying on.
 - Do **not** run the length sweep live — the four-rung reality reads as a broken
   dial. Pre-record it.
 - Total runtime 260 s. Talk over it; don't watch it in silence.
@@ -359,6 +381,11 @@ the one thing on the list a vendor could fix in an afternoon.
 Callback to the cold open. Re-show the frozen frame: aircraft 1.39 m off,
 indicator still green, telemetry still saying *arrived*.
 
+Press `Space` to freeze the screen **while the run is still live** — a second
+or two after the chain stops, the badge correctly goes red on a stalled feed,
+which destroys the one image this section needs. Frozen, it holds green for as
+long as you want to stand in front of it.
+
 *"It never said anything was wrong. It doesn't have a way to say it. A machine
 that is confidently wrong is more dangerous than one that knows it's broken —
 and we built an entire industry on a broadcast nobody signs."*
@@ -369,10 +396,23 @@ and we built an entire industry on a broadcast nobody signs."*
 
 - [ ] File the RTKLIB patch PR (§11 slide depends on it)
 - [ ] `offsetof(sta_t,pos)` on ARM — cross-compile, no emulation needed
-- [ ] Build the demo visuals: map, two icons, persistent FIXED indicator
-- [ ] Record the fallback demo video
+- [x] Build the demo visuals: map, two icons, persistent FIXED indicator —
+      `research/demo_view.py`, verified against a live run 2026-07-27
+- [x] Record the fallback demo video — *superseded, and better:* every live run
+      records 10 Hz state frames, and `--replay` plays them back through the
+      same renderer. Not a video, so there is no editing step to get wrong and
+      it cannot drift from what the live demo looks like
 - [ ] Record the length sweep (do not run live)
-- [ ] Rehearse a failed start and the recovery patter
+- [ ] **Rehearse a failed start and the recovery patter** — now the binding
+      constraint. Rehearse the three specific ways the chain can be down while
+      the screen still looks plausible, all hit for real on 2026-07-27: a
+      leftover process holding a port (`require_port` aborts in 10 s, naming
+      it); WSL killing the collector when a session closes, which presents as
+      the browser refusing to connect and looks like a network fault; and a
+      viewer showing the *previous* run's phase and armed state. Know what each
+      looks like from the stage and what you say while fixing it
+- [ ] Copy a known-good `view.jsonl` somewhere durable before travelling — the
+      first live run at the venue truncates the one in `$T`
 - [ ] Tier 1 hardware ordered and the conducted path bench-tested
 - [ ] Decide: does the Reach M2 get bought before or after acceptance?
 

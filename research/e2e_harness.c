@@ -212,6 +212,13 @@ int main(int argc, char **argv)
     uint8_t nbuf[4096];
     int nsent = 0;
 
+    /* stdout is a file in every scripted run, so it is block-buffered at 4 KB.
+     * The base-position line below is printed only when rtk.rb CHANGES -- one
+     * line for the whole attack -- so it would sit unflushed in the buffer for
+     * minutes. demo_view.py tails this to show the corrupted coordinate the
+     * instant RTKLIB adopts it, which needs the line to actually be on disk. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
     if (argc < 3) {
         fprintf(stderr,
                 "usage: %s <rover> <base> [seconds] [speed] [file|serial]\n",

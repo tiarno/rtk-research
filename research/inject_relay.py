@@ -89,6 +89,34 @@ def pump(src, dst, splicer, stats):
                 pass
 
 
+def report(splicer, stats, pump_thread):
+    """
+    Print running counts while the relay works.
+
+    The end-of-client summary is enough for a measurement but useless for a
+    live view: demo_view.py tails this log to show the injection count
+    climbing, which is the visible form of "the attack is purely additive --
+    the legitimate stream keeps working and one extra message rides along".
+    Prints only on change, so a stalled relay is visible as a stalled count.
+
+    Runs on the control path too, where there is no splicer at all. Bytes are
+    the number that exists either way: with --len 0 the relay is a pure byte
+    passthrough and nothing counts frames, so a frame count would sit at zero
+    while the stream is in fact flowing perfectly -- which reads, during the
+    control run, as a dead chain.
+    """
+    last = None
+    while pump_thread.is_alive():
+        now = (splicer.frames if splicer else -1,
+               splicer.injected if splicer else 0,
+               stats["bytes"])
+        if now != last:
+            print(f"status: frames={now[0]} injected={now[1]} bytes={now[2]}",
+                  flush=True)
+            last = now
+        time.sleep(0.5)
+
+
 def wait_to_arm(args, pump_thread):
     """
     Hold off injection until the clean phase is genuinely over.
@@ -176,6 +204,8 @@ def main():
             t = threading.Thread(target=pump, args=(up, cli, splicer, stats),
                                  daemon=True)
             t.start()
+            threading.Thread(target=report, args=(splicer, stats, t),
+                             daemon=True).start()
             armed = wait_to_arm(args, t)
             if armed:
                 print(f"--- ATTACK: injecting after every {args.after} ---",
@@ -186,7 +216,16 @@ def main():
                       flush=True)
             t.join()
         else:
-            pump(up, cli, splicer, stats)
+            # Threaded rather than inline so the control run gets a status
+            # feed too -- the demo screen has to show the chain is alive
+            # precisely when the claim is "and with the attack off, nothing
+            # happens".
+            t = threading.Thread(target=pump, args=(up, cli, splicer, stats),
+                                 daemon=True)
+            t.start()
+            threading.Thread(target=report, args=(splicer, stats, t),
+                             daemon=True).start()
+            t.join()
 
         print(f"client gone: {stats['bytes']} bytes, "
               f"{splicer.frames if splicer else 0} frames, "
