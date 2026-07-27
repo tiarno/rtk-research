@@ -163,13 +163,17 @@ written to stand alone.
 > public and nothing could have cloned it. What *was* public for those eight
 > days is everything up to `aa20a26` and nothing after.
 >
-> The reason to reword it is therefore not exposure but tone. The body said
-> the methodology section "is the thing FuzzingLabs cannot match" — a
-> competitive dig at the researchers this work credits in §11 and is currently
-> in coordinated disclosure with. That reason stands on its own, and rewriting
-> unpushed history costs nothing. Deliberately not referring to either commit
-> by hash here: the reword changes them, and stale hashes in this file have
-> had to be repaired twice already.
+> The reason to reword it is therefore not exposure but tone. The body claimed
+> the methodology section was something the researchers who reported the bug
+> could not match — a competitive comparison to the people this work credits in
+> §11 and is currently in coordinated disclosure with. That reason stands on
+> its own, and rewriting unpushed history costs nothing. **Paraphrased rather
+> than quoted here, deliberately:** an earlier version of this note reproduced
+> the sentence verbatim in order to explain why it was wrong, which put the
+> remark back into the repository in the course of removing it. Describing it
+> is enough. Deliberately not referring to either commit by hash either: the
+> reword changes them, and stale hashes in this file have had to be repaired
+> twice already.
 
 **The patch is written and verified but deliberately not filed.** `check_clamp.sh`
 measures it: benign streams byte-identical, all three attack variants left at
