@@ -425,24 +425,25 @@ TDL450, Satel 4Pro) are a different animal: GMSK/4FSK, 403–473 MHz, transparen
 serial. Full plan, both paths, and the hardware list in
 [talk-outline.md](talk-outline.md#8-delivering-it-over-the-air).
 
-## Files changed, 2026-07-27 later session — UNCOMMITTED
-
-Two new, six modified. Nothing committed; the changes to `e2e_harness.c` and
-`loop_demo.sh` touch the measurement path and should be read before they go in,
-even though both are additive.
-
-| file | change |
-|---|---|
-| `research/demo_view.py` | **new** — collector: NMEA tap, truth tap, log tails, 10 Hz state frames, SSE server, JSONL recording, `--replay` |
-| `research/demo_view.html` | **new** — renderer: two plan views, FIXED badge, mechanism panel, freeze, off-frame marker. Self-contained, no CDN |
-| `research/loop_demo.sh` | `--serial2 tcp:5763` + `SERIAL2_PROTOCOL`/`SR2_*` for the truth tap; truncate `flight/relay/rtklib.log` up front; `python3 -u` on the flight driver |
-| `research/e2e_harness.c` | `setvbuf(stdout, NULL, _IOLBF, 0)` so the base-position line reaches disk when it is written, not 4 KB later |
-| `research/inject_relay.py` | `report()` status thread on both the injecting and the passthrough path; reports bytes, which is the count that exists either way |
-| `research/ardupilot_demo.py` | print `hold: lat,lon` so the map can pin the commanded hold point |
-| `docs/HANDOFF.md` | this section, the demo section at the top, Key Parameters rows, the WSL session trap |
-| `docs/talk-outline.md` | checklist ticked, §0 cold-open note, §7 "what is on the screen", §12 freeze, fallback-truncation warning |
-
 ## Commits, most recent session first
+
+**2026-07-27, later session.** Four commits, `fe9aab3..846ff4a`, and the first
+push since 2026-07-19 — `origin/master` had been 27 commits behind and is now
+current.
+
+| commit | what |
+|---|---|
+| `fe9aab3` | the demo visualisation (`demo_view.py`, `demo_view.html`) and the passive taps that feed it: SERIAL2 for truth, line-buffered harness stdout so the base-position line lands when written, a relay status thread, and a printed hold point |
+| `441ead9` | **corrected** the claim that the talk-outline commit had been public for eight days — it was never pushed. The reword still happened, for tone rather than exposure |
+| `c20ba39` | repaired the commit hashes the reword moved, same as `b1f69a2` before it |
+| `846ff4a` | stopped reproducing the reworded remark in the course of explaining it — the correction had reintroduced the thing it was correcting |
+
+Files in `fe9aab3`: `research/demo_view.py` and `research/demo_view.html` new;
+`loop_demo.sh` (SERIAL2 + stream rates, truncate the viewer-visible logs up
+front, `python3 -u` on the flight driver), `e2e_harness.c` (`setvbuf` line
+buffering), `inject_relay.py` (status thread on both the injecting and the
+passthrough path, reporting bytes), `ardupilot_demo.py` (print `hold:`), plus
+`.claude/settings.json` now tracked and its machine-local sibling ignored.
 
 **2026-07-26, later session.** Eight commits, `3cd70d4..21dc20c`:
 
