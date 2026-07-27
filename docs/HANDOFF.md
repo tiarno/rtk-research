@@ -30,12 +30,46 @@ So it is not "the normal RTK configuration" (vague, and challengeable) but
 `research/README.md` under "Which configurations are exposed"; §11's operator
 advice and the audience-question table updated.
 
-**Next: the disclosure moves.** The repo is already public and has been since
-2026-07-19, so priority is established but undiscoverable. In order: comment on
-RTKLIB issue #799 stating that the overflow reaches `sta.pos` and linking here;
-email FuzzingLabs; notify Emlid (obligation — the repo publicly documents that
-their product's source carries it — and they may simply answer the
-fortified/unfortified question for free). Patch PR after.
+## Disclosure timeline
+
+Talk §11 turns on this, so it is recorded here as it happens rather than
+reconstructed later.
+
+| date | what | state |
+|---|---|---|
+| 2026-06-09 | FuzzingLabs (@raefko) file upstream issues #796–799; #799 is the type 1033 bug | all four still **open**, one comment each, no maintainer reply |
+| 2020-12-29 | last commit to upstream's `rtklib_2.4.3` release branch | — |
+| 2026-07-19 | this repo made public | — |
+| 2026-07-27 | **repo made private** — a pause to think, not a retraction | reversible; see below |
+| 2026-07-27 | **comment posted on #799**: the overflow reaches `sta.pos`, `antdes` cannot, the real-time path adopts it unguarded while `postpos.c:843` guards, Q=1 maintained, every measured build unfortified | awaiting response |
+| 2026-07-27 | **Emlid notified by email** — their `reach` fork carries the defect and the inlined unguarded adoption; asked whether `_FORTIFY_SOURCE` is active in shipped firmware | awaiting response |
+
+The #799 comment is deliberately self-sufficient: every claim in it is
+checkable against RTKLIB's own source, so it stands as a dated priority marker
+whether or not this repo is public. Held back from it: the four-rung magnitude
+behaviour and the `n1=211` universal bound, the clamp (belongs in the PR), the
+misalignment defect (belongs in its own issue), and Emlid entirely.
+
+**Repo visibility.** Public 2026-07-19 to 2026-07-27, now private. Two things
+follow. Priority no longer rests on the repo — it rests on the #799 comment,
+which is why that was written to stand alone. And while it is private there is
+a clean window to rewrite `1d5645f`, whose commit body contains "is the thing
+FuzzingLabs cannot match" — public for eight days, almost certainly never
+cloned, so a rebase would genuinely remove it rather than leaving it reachable
+by SHA. Cost is the hash references in the commit table below, which have been
+repaired once already (`b1f69a2`).
+
+**The patch is written and verified but deliberately not filed.** `check_clamp.sh`
+measures it: benign streams byte-identical, all three attack variants left at
+truth, UBSan finding gone with the control firing first. Holding the PR until
+there is a response to the #799 comment — filing it immediately would spend the
+one piece of leverage the comment has, and §11's slide reads better as "here is
+the fix, filed, still unmerged" than as a PR nobody was asked for.
+
+**Still to do:** the PR when the time comes, and a decision on whether the
+misalignment defect gets filed as its own issue. A FuzzingLabs email is now
+optional — commenting on #799 notifies @raefko automatically, since it is
+their issue.
 
 ---
 

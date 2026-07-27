@@ -73,6 +73,42 @@ always NUL. `strncpy` copies to that NUL and **zero-pads the remainder**:
 Every out-of-bounds byte is zero. This is a **zeroing primitive**, not an
 arbitrary write. No attacker-chosen value can be placed out of bounds.
 
+### A second defect: a length above 31 misaligns the rest of the message
+
+Separate from the overflow, found while verifying the clamp below, and not in
+FuzzingLabs' report. The five length bytes are read with absolute bit offsets
+computed from the declared lengths, so those are always correct. The sequential
+walk that follows is not:
+
+```c
+for (j=0;j<n&&j<31;j++) { des[j]=getbitu(rtcm->buff,i,8); i+=8; }
+setup=getbitu(rtcm->buff,i, 8); i+=8+8;
+```
+
+`i` advances by at most 31 bytes while the wire format carries the full
+declared length, so any length above 31 leaves the walk short by `len-31` bytes
+and **every field after it is parsed from the wrong offset**.
+
+Measured (`misalign_check.py`) with `antdes` declared at 40 and everything else
+ordinary — control at 20 in the same run:
+
+| | expected | antdes=20 | antdes=40 |
+|---|---|---|---|
+| `antsetup` | 7 | 7 | **68** (`0x44`, the 32nd descriptor byte) |
+| `rectype` | `TRIMBLE NETR9` | `TRIMBLE NETR9` | **`NO-ALPHA.TRIM`** |
+| `recsno` | `RSN-OMEGA` | `RSN-OMEGA` | **`TR9.5.22.`** |
+
+Displaced by exactly the 9 bytes the walk fell short. Note the field *lengths*
+stay correct, because those come from the absolute-offset reads — only the
+contents shift, so the result is plausible-looking garbage rather than an
+obvious parse failure.
+
+Two things this is not. It is **not** a memory-safety issue — every read stays
+inside the frame. And it does **not** affect the station-position attack, which
+oversizes `rectype`: everything that attack depends on is parsed before the
+walk reaches that field. It bites when an *earlier* field is oversized. It is
+also unaffected by the clamp — the clamp stops the write, not the walk.
+
 ### What each field reaches
 
 Measured on x86-64 / gcc. `sizeof(sta_t)` is 560; `sta` sits at
@@ -964,6 +1000,8 @@ with a different toolchain (gcc/glibc vs. Apple clang).
 | `loop_demo.sh` | the closed loop — packet to propeller in one run (`0` for the control) |
 | `loop_latency.py` / `.sh` | loop delay with no vehicle in it; `MODE=speed` checks the reported ground speed and course against a fed ramp |
 | `sign_check.py` | truth, GPS and EKF traces in one frame — which way the aircraft moved, and why |
+| `misalign_check.py` | the second defect: a declared length above 31 misaligns every field parsed after it, with a control at 20 |
+| `check_clamp.sh` | does the proposed fix work — stock vs. clamped on the same streams, plus UBSan with the control firing first |
 | `check_fork.sh` | is a given RTKLIB fork still vulnerable — unclamped copy, `offsetof(sta_t,pos)`, and whether the real-time path adopts the coordinate unguarded |
 | `check_binary.sh` | which column a shipped binary falls into: `*_chk` imports, and whether the 1033 decoder is actually in the binary being tested |
 | `check_image.sh` | look inside a firmware/OS image for RTKLIB without root — `dd` + `debugfs`, no mounting |
@@ -1034,6 +1072,11 @@ throughout as memory corruption. Specifically new here:
   **cannot reach `pos` at 464**. Only `rectype`, `recver` and `recsno` can. For
   the same reason `decode_type1007`/`1008`, which write only the earlier
   fields, cannot reach it either — 1033 is the only one of the three that can.
+- A second, unrelated defect in the same function: a declared length above 31
+  misaligns every field parsed after it, because the sequential walk advances
+  by at most 31 bytes while the wire format carries the full length. Not a
+  memory-safety issue, and not what the station-position attack uses. See
+  "A second defect" above.
 - The declared length acts as a magnitude dial on the coordinate error.
 - A small error leaves the solution at Q=1 (RTK fixed) while metres off.
 - On glibc builds with `_FORTIFY_SOURCE` active, the fortified `strncpy`
@@ -1045,6 +1088,46 @@ throughout as memory corruption. Specifically new here:
 
 In short: they found and correctly characterised the memory-safety defect. The
 positioning-integrity consequence and the build-dependent split are additions.
+
+## The fix
+
+Five lines, placed after the frame-length check — which must keep using the
+declared lengths, since it is the wire framing test — and after the read loops,
+which already discard anything past 31:
+
+```c
+if (n >31) n =31;
+if (m >31) m =31;
+if (n1>31) n1=31;
+if (n2>31) n2=31;
+if (n3>31) n3=31;
+```
+
+The staging buffers are 32 bytes, so this only stops the write from claiming
+more than was ever read. `check_clamp.sh` builds the harness against the stock
+checkout and against a tree whose only difference is the clamp, and runs the
+same streams through both:
+
+| stream | stock `sta.pos` | clamped |
+|---|---|---|
+| benign | truth | truth |
+| `n1=211` | -2694684.0000 (1.47 m off) | **truth** |
+| `n1=255` | 0, 0, 0 | **truth** |
+| `recsno=255` | 0, 0, 0 (and `dgps` cleared) | **truth** (`dgps` intact) |
+
+And under UBSan, with the control firing first so that "clean" means something:
+
+```
+stock:   runtime error: index 255 out of bounds for type 'char [64]'   (rtcm3.c:1019)
+clamped: clean
+```
+
+Benign streams decode byte-identically, so the clamp costs nothing a conforming
+base station would notice.
+
+**Not filed as a PR yet** — pending a response to the analysis posted on
+issue #799 (2026-07-27). It does not fix the misalignment defect described
+above; that one is in the walk, not the write.
 
 ## Disclosure status
 
