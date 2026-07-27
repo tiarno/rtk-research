@@ -43,10 +43,10 @@ hardened, which is precisely the RTKLIB-derived firmware class.
 `decode_type1033` reads five descriptor strings, each an 8-bit length followed
 by that many characters. It stages them in 32-byte locals with correctly
 bounded read loops, then copies them into `rtcm->sta` with the *unbounded*
-declared length ([src/rtcm3.c:905-910](https://github.com/tomojitakasu/RTKLIB/blob/rtklib_2.4.3/src/rtcm3.c#L905)):
+declared length ([src/rtcm3.c:1016-1021](https://github.com/tomojitakasu/RTKLIB/blob/rtklib_2.4.3/src/rtcm3.c#L1016)):
 
 ```c
-strncpy(rtcm->sta.rectype,rec,n1); rtcm->sta.rectype[n1]='\0';
+strncpy(rtcm->sta.rectype,rec,n1); rtcm->sta.rectype[n1]='\0';   /* :1019 */
 ```
 
 `n1` comes straight off the wire, so it ranges 0-255 against a 64-byte field.
@@ -1011,6 +1011,9 @@ containment within the single `rtcm_t` allocation; ASan blindness and the
 need for UBSan; "corrupts adjacent `sta_t`/`rtcm_t` members". All of it holds.
 Their report also notes the same unclamped pattern in `decode_type1007`
 (`rtcm3.c:469`) and `decode_type1008` (`:507`), which is not examined here.
+Those two line numbers are quoted as they appear in their report and do not
+resolve against the tree measured here, where the functions begin at 504 and
+537 — presumably a different checkout on their side.
 
 **Refined here.** The overflow content is NUL padding, not attacker bytes, so
 there is no controlled write — which settles the exploitability question
