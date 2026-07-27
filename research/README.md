@@ -302,8 +302,9 @@ including the 5 mm perturbation at `n1=210` and the 2.4 m one at 212.
 Limitations. Everything in `sta_t` ahead of `pos` is `char` arrays and `int`s
 (448 + 12 = 460, padded to 464 for 8-byte alignment), so `pos` sits at the
 same offset in both ABIs and a single payload length works across both. That
-equivalence is measured on these two builds; it is not a general claim about
-every target, and ARM in particular is untested.
+equivalence is measured on these two builds — and has since been measured
+directly across six ABIs, including ARM, all of which put `pos` at 464. See
+"The payload length transfers unchanged".
 
 Both distributions also ship the real-time applications `rtknavi.exe` and
 `strsvr.exe`, and those binaries contain the same decoder — the trace strings
@@ -393,8 +394,44 @@ package — actually does.
 
 That also supplies the first real ARM binary in this work, which weakens the
 case for the qemu offset exercise: ARM builds exist, ship, and are unfortified.
-It does not by itself confirm the `sta_t` offsets on ARM, which still want
-checking before a payload length is claimed for that target.
+
+### The payload length transfers unchanged — measured, six ABIs
+
+Everything above was an argument about *fortification*. A separate question
+had been left open: whether the payload lengths measured here mean anything on
+another architecture at all. They are derived from `offsetof(sta_t,pos)`, and
+that offset is decided by the target ABI's alignment rules rather than by
+RTKLIB's source, so "the same payload works" was a claim about ABIs that had
+only ever been checked against x86-64.
+
+Measured with `check_offsets.py`, which needs nothing to run on the target: the
+compiler already knows the offset at translation time, so each candidate value
+is put to it as a `_Static_assert` and the answer is read off compile success.
+
+| target | `rectype` | `pos` | `del` | `hgt` | `sizeof` |
+|---|---|---|---|---|---|
+| x86-64 | 256 | **464** | 488 | 512 | 560 |
+| armhf 32-bit hard-float | 256 | **464** | 488 | 512 | 560 |
+| armel 32-bit soft-float | 256 | **464** | 488 | 512 | 560 |
+| arm64 | 256 | **464** | 488 | 512 | 560 |
+| riscv64 | 256 | **464** | 488 | 512 | 560 |
+| ppc64 | 256 | **464** | 488 | 512 | 560 |
+
+Identical on all six, because every ABI here aligns `double` to 8 bytes. The
+one worth calling out is **armel**: soft-float, no FPU in the ABI at all, and
+still 8-byte alignment, because that is what AAPCS specifies rather than a
+property of the hardware. The obvious way for this to have differed — a target
+that aligns `double` to 4 — does not occur among the architectures Debian
+ships RTKLIB for.
+
+So `n1=211` is not an x86-64 number. It is the number, on every architecture
+checked.
+
+*Control:* the same offsets read independently with the system gcc, which
+reproduces the 464 measured elsewhere in this repo by other means. `zig cc`
+(clang) and gcc agree exactly; the script stops rather than report anything if
+they do not, because a method whose control disagrees is not measuring
+anything.
 
 **Why this matters more than the desktop result.** ArduPilot documents Reach as
 a supported RTK GPS: the unit mounts on the vehicle, outputs coordinates to the
@@ -1003,6 +1040,7 @@ with a different toolchain (gcc/glibc vs. Apple clang).
 | `misalign_check.py` | the second defect: a declared length above 31 misaligns every field parsed after it, with a control at 20 |
 | `check_clamp.sh` | does the proposed fix work — stock vs. clamped on the same streams, plus UBSan with the control firing first |
 | `check_fork.sh` | is a given RTKLIB fork still vulnerable — unclamped copy, `offsetof(sta_t,pos)`, and whether the real-time path adopts the coordinate unguarded |
+| `check_offsets.py` | does the payload length transfer to other architectures — `sta_t` layout across six ABIs, by cross-compilation, with nothing run on the target |
 | `check_binary.sh` | which column a shipped binary falls into: `*_chk` imports, and whether the 1033 decoder is actually in the binary being tested |
 | `check_image.sh` | look inside a firmware/OS image for RTKLIB without root — `dd` + `debugfs`, no mounting |
 | `pick_base.py` | what each `n1` rung does to a given base coordinate, and where to site a demo base so the reliable rung is also a visible one |
@@ -1176,11 +1214,15 @@ Read these before quoting anything above.
   encoding and produce identical flag sequences, so the comparison holds. The
   synthetic streams from `gnss_sim` do not have this problem and hold Q=1
   (fixed) in both runs.
-- Offsets are x86-64 / gcc. The shipped 32-bit Windows build turns out to give
-  identical thresholds and magnitudes (see "The same dial on the binaries
-  people actually run"), because everything in `sta_t` ahead of `pos` is
-  `char` arrays and `int`s. ARM remains untested, and the thresholds must
-  still be recomputed for any target whose alignment differs.
+- Offsets were originally x86-64 / gcc, and are now measured across six ABIs —
+  x86-64, armhf, armel, arm64, riscv64, ppc64 — which all put `pos` at 464, so
+  the thresholds transfer unchanged (`check_offsets.py`, and see "The payload
+  length transfers unchanged"). The shipped 32-bit Windows build agrees, for
+  the same reason: everything in `sta_t` ahead of `pos` is `char` arrays and
+  `int`s. What is measured there is the **ABI**, via two compilers that agree —
+  not any particular shipped binary. A build with non-default packing or a
+  patched header would still need its own thresholds; none was found or looked
+  for.
 - The magnitude for a given `n1` is dataset-specific — it depends on the base
   station's coordinate values, since mantissa bytes are being truncated.
 - Only one rover/base pair (2005, GPS-only) was tested. Whether the Q=1

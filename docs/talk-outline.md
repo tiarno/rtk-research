@@ -395,7 +395,10 @@ and we built an entire industry on a broadcast nobody signs."*
 ## Pre-submission checklist
 
 - [ ] File the RTKLIB patch PR (§11 slide depends on it)
-- [ ] `offsetof(sta_t,pos)` on ARM — cross-compile, no emulation needed
+- [x] `offsetof(sta_t,pos)` on ARM — **464 on all six ABIs checked** (x86-64,
+      armhf, armel, arm64, riscv64, ppc64), so the payload transfers unchanged.
+      `research/check_offsets.py`. Strengthens §4: `n1=211` is not an x86-64
+      number, it is the number
 - [x] Build the demo visuals: map, two icons, persistent FIXED indicator —
       `research/demo_view.py`, verified against a live run 2026-07-27
 - [x] Record the fallback demo video — *superseded, and better:* every live run

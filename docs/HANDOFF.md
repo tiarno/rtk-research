@@ -361,12 +361,24 @@ Parameters).
 > that checklist first: on current state it is the binding constraint, not
 > anything below.
 
-**1. ARM offsets — mostly overtaken, ~30 min if wanted.** Debian's shipped
-armhf binaries are now in hand (`/tmp/deb`), so ARM builds no longer need qemu
-to exist — but the `sta_t` offsets on ARM are still unconfirmed, and that is
-what a payload length for an ARM target depends on. Cheapest remaining version:
-compile the offset probe with `arm-linux-gnueabihf-gcc` and print
-`offsetof(sta_t,pos)`; no emulation needed since nothing has to run.
+**1. ARM offsets — DONE 2026-07-27.** `offsetof(sta_t,pos)` is **464 on every
+architecture checked**: x86-64, armhf, armel, arm64, riscv64, ppc64. Identical
+layout throughout, so the payload lengths measured here are not x86-64 numbers
+and `n1=211` needs no adjustment for an ARM target.
+
+`check_offsets.py` measures it, and nothing runs on the target: the compiler
+knows the offset at translation time, so each candidate is put to it as a
+`_Static_assert` and the answer read off compile success. Cross-compiler is
+`zig cc` — clang, installable with `pip install --user ziglang`, which
+`arm-linux-gnueabihf-gcc` was not without root. Control is the system gcc
+reading the same offsets on x86-64; it reproduces the 464 already in this repo,
+and the script refuses to report anything if the two disagree.
+
+The result worth keeping is the **armel** row: soft-float, no FPU in the ABI,
+and still 8-byte `double` alignment, because that is AAPCS rather than a
+property of the hardware. The obvious way this could have differed does not
+occur on anything Debian ships RTKLIB for. Written up in `research/README.md`
+under "The payload length transfers unchanged".
 
 **2. `decode_type1007` / `1008` — ~1 hour.** Same harness, different message
 type. Expect a negative result worth stating precisely: those fields stop short
@@ -540,11 +552,12 @@ Environment traps worth remembering:
   affected (`./check_fork.sh emlid/RTKLIB reach`), but the shipped firmware was
   not obtainable. Say "the source is affected", not "the product behaves this
   way".
-- **ARM: measured for fortification, unconfirmed for offsets.** Debian's armhf
-  binaries are unfortified, so ARM builds ship in the silent column. But
-  `offsetof(sta_t,pos)` on ARM has not been checked, and that is what a payload
-  length for an ARM target depends on. `check_fork.sh` computes it from a
-  header; it has only been run against x86-64 assumptions.
+- **ARM: no longer a caveat.** Resolved 2026-07-27 — `offsetof(sta_t,pos)` is
+  464 on x86-64, armhf, armel, arm64, riscv64 and ppc64 alike, so the payload
+  lengths transfer unchanged (`check_offsets.py`). What remains is narrower and
+  worth stating precisely: this measures the **ABI**, via two compilers that
+  agree, not the specific binary Debian shipped. A build using a non-default
+  packing or a patched header would not be covered, and none was checked.
 - Windows measurement covers the decode and coordinate corruption, not the
   real-time adoption — the GUI apps were not driven.
 - The vertical result is specific to a multirotor with a barometer. A vehicle
