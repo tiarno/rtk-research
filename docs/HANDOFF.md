@@ -349,23 +349,43 @@ the invoking `bash -lc` too (it matches its own command line), and a
 
 ## Where this is going
 
-The work is destined for a conference talk **with a live demo**, decided
-2026-07-26. No deadline. That changes the priorities below: a live demo has to
-survive someone asking "why is that setting changed?", so harness deviations
-from a stock configuration are load-bearing rather than footnotes, and startup
-reliability matters as much as the numbers.
+**Undecided as of 2026-07-31, and nothing is time-critical.** There is no
+deadline, no submitted CFP, and no publication date. Two possible outputs exist
+and neither is committed to:
+
+- **A conference talk with a live demo.** Planned 2026-07-26, still viable, no
+  venue. The outline and its checklist are in
+  [talk-outline.md](talk-outline.md); treat that document as *contingent*, not
+  as a plan of record.
+- **A long-form article for a general audience**, drafted at
+  [blog-1033-draft.md](blog-1033-draft.md). Complete and readable, **not
+  published**, with its three publication blockers listed in an HTML comment at
+  the top of the file. It stands alone and does not depend on the talk
+  happening.
+
+**What that means for anyone picking this up.** The research is at a natural
+resting point: both attacks are measured, both are written up, and the
+authoritative record is [research/README.md](../research/README.md). Nothing
+below is urgent. Do not treat the talk checklist as a live constraint unless a
+talk is actually being pursued again — the live-demo requirement is what made
+harness realism and startup reliability load-bearing, and if there is no talk,
+those items drop in priority.
+
+**What still matters regardless of the output:** the accuracy discipline. Every
+claim in this repo is either measured or explicitly labelled as reasoned, and
+the standing caveats below say which is which. That is what makes the work
+usable for either path — or for neither.
 
 ## Next steps, in the order I would take them
 
 Effort figures are rough and assume the environment is already set up (see Key
-Parameters).
+Parameters). **None of these is blocking anything**; they are what a next
+session would pick up if the work continues.
 
 > **These are the *research* items.** Talk-preparation tasks — demo visuals,
 > the recorded fallback, rehearsing a failed start, hardware to order — live in
-> [talk-outline.md](talk-outline.md#pre-submission-checklist) so the two lists
-> cannot drift apart. If you are picking up work and the goal is the talk, read
-> that checklist first: on current state it is the binding constraint, not
-> anything below.
+> [talk-outline.md](talk-outline.md#pre-submission-checklist). Those are only
+> relevant if a talk is being pursued; see "Where this is going".
 
 **1. ARM offsets — DONE 2026-07-27.** `offsetof(sta_t,pos)` is **464 on every
 architecture checked**: x86-64, armhf, armel, arm64, riscv64, ppc64. Identical
@@ -386,21 +406,84 @@ property of the hardware. The obvious way this could have differed does not
 occur on anything Debian ships RTKLIB for. Written up in `research/README.md`
 under "The payload length transfers unchanged".
 
-**2. `decode_type1007` / `1008` — ~1 hour.** Same harness, different message
+**2. The fortified column, end to end — DONE 2026-07-31.** Both columns are now
+flown, same aircraft, same profile, same `n1=211`, differing only in the build.
+
+    FORTIFY=1 HOLD=1 ./loop_demo.sh 211      # abort column
+    HOLD=1 ./loop_demo.sh 211                # silent column (control)
+
+| | fortified | unfortified |
+|---|---|---|
+| GPS `Status` | 6 → **0** at 87.5 s | **6 throughout**, 49.2 → 188.2 s |
+| `ERR` records | 4 | **0** |
+| failsafe | EKF variance → auto **LAND**, 4.0 s after GPS loss | none |
+| on the ground | 120.6 s, 0.50 m/s, disarmed 122.7 s | flew the leg, reported arrival **1.42 m off** |
+
+Written up in `research/README.md` under "What the abort does to the aircraft",
+and the reasoned-not-measured labels are out of all four documents. The
+`SmartRTL deactivated: bad position` line is worth keeping in the pitch — the
+aircraft *could not* RTL, so fail-stop means landing wherever it happens to be.
+
+**Two things this produced that were not the point.**
+
+*A harness trap, and it nearly became the answer.* Pointing SITL's GPS port
+straight at RTKLIB means the abort **closes the socket**, SITL fails the port
+(`connect failed on port 5903 ... Bad file descriptor`), and the simulator
+exits — flight log ends at 88.1 s, failsafe logic never runs. That is the
+simulator quitting, not the aircraft responding, and it looks enough like a
+result to write up as one. `nmea_hold.py` (new) holds the client socket open and
+goes silent when the producer dies, which is what a crashed receiver looks like
+from the far end of a UART. `HOLD=1` inserts it; the unfortified control run
+through the same proxy reproduces 1.42 m against the 1.40 m recorded 2026-07-27,
+which is what makes the proxy transparent rather than assumed to be.
+
+*`FORTIFY=1` and `HOLD=1` are both default-off* precisely so the stage demo is
+untouched. Do not change the defaults.
+
+**And then the finding that changed the framing.** The first write-up of this
+reported the abort as the *safe* column. That was wrong, and the correction is
+now §5b of the talk. `SmartRTL deactivated: bad position` means the aircraft
+**cannot return home** — landing where it stands is its only option, and the
+attacker chooses when that happens. So the abort is a **denial-of-flight
+primitive with attacker-controlled timing**, which the unfortified build does
+not offer.
+
+`land_drift.py` (new) measures the targeting error: **10.13 m** of horizontal
+drift between GPS loss and touchdown, from a 15 m hover, 29.1 s descent,
+monotonic. Enough for a lake or a field; not enough for a lane of traffic. It
+refuses a log with no failsafe in it, so it cannot report a forced landing that
+did not happen.
+
+**The framing that survives:** two attacks, not a bug and a mitigation.
+Unfortified is precise/silent/small; fortified is crude/loud/total. *Do not
+report fortification as a fix anywhere* — the fix is the clamp. Written up in
+`research/README.md` under "The abort is a second attack".
+
+**Still not measured:**
+- The crash loop on restart. The injector splices a 1033 after every 1005, so a
+  restarted process should die immediately on the next one; two-minute check,
+  forecloses "just restart it". The run above ends with the aircraft on the
+  ground instead.
+- **Dispersion as a distribution.** 10.13 m is one sample in zero wind. Repeats
+  across altitude and `SIM_WIND_SPD` would turn it into a claim worth quoting;
+  right now it is a floor. If §5b gets challenged, this is the gap.
+
+**3. `decode_type1007` / `1008` — ~1 hour.** Same harness, different message
 type. Expect a negative result worth stating precisely: those fields stop short
 of `pos`, so memory-safety only, no positioning impact. It answers "why 1033?"
 
-**3. A patch PR to RTKLIB — nearly free.** The fix is a three-line clamp. It
-will probably sit unmerged, which is the point: "here is the four-line fix,
-filed, still unmerged" closes better than "still unpatched".
+**4. A patch PR to RTKLIB — nearly free.** The fix is a **five-line** clamp (one
+per declared length; `research/README.md`, "The fix"). It will probably sit
+unmerged, which is the point: "here is the five-line fix, filed, still unmerged"
+closes better than "still unpatched".
 
-**4. Real hardware — a few hundred dollars, a weekend, biggest credibility
+**5. Real hardware — a few hundred dollars, a weekend, biggest credibility
 gain.** Note the F9P cannot be the target: it does not run RTKLIB. The setup is
 an F9P feeding real observations to **RTKNAVI on Windows** — now measured as
 unfortified — with the 1033 injected into an NTRIP correction stream. Upgrades
 the result from simulated to real satellites, real receiver, shipped software.
 
-**5. Embedded firmware (Emlid Reach) — SOURCE DONE 2026-07-26, binary blocked.**
+**6. Embedded firmware (Emlid Reach) — SOURCE DONE 2026-07-26, binary blocked.**
 `emlid/RTKLIB` branch `reach` carries the defect unchanged, the same `sta_t`
 layout (so the same payload lengths work), and the unvalidated adoption inlined
 into `updatesvr()` at `rtksvr.c:219`. Written up in `research/README.md`. That
@@ -578,6 +661,20 @@ Environment traps worth remembering:
   example files in the source tree only. What RTKNAVI's GUI selects on a fresh
   install, what demo5 ships, and what Emlid Reach's web UI configures are all
   unchecked — and they are what a claim about real receivers would rest on.
+- **The abort column is one aircraft, one profile.** Measured 2026-07-31 on
+  ArduCopter 4.7.0 / EKF3 / stock failsafe params. The *direction* — a
+  detectable event versus none — is the claim; 4.0 s and 33.1 s are
+  illustrative. Fixed-wing, ground vehicles and non-default `FS_EKF_ACTION` are
+  untested, and the crash-loop-on-restart behaviour is still reasoned only.
+- **Any run where RTKLIB is expected to die needs `HOLD=1`.** Without the proxy
+  the socket closes, SITL quits on the port, and the run measures the simulator
+  rather than the aircraft. See next step 2.
+- **Never describe `_FORTIFY_SOURCE` as the fix.** It exchanges a silent
+  position-corruption attack for a loud forced-landing attack that the
+  unfortified build cannot perform. Both columns are attacks; the fix is the
+  five-line clamp. This corrects the framing used before 2026-07-31.
+- **The 10.13 m landing dispersion is a floor, not a bound.** One run, zero
+  wind, 15 m hover, near-stationary aircraft. Do not write "±10 m".
 
 ---
 

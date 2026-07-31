@@ -1,8 +1,12 @@
 # RTK Research Workspace
 
-Research toward a conference talk on trust boundaries in RTK/GNSS positioning:
-*where does a GPS-dependent system begin trusting location, how can that trust
-be manipulated, and what physical or security decision follows?*
+Research on trust boundaries in RTK/GNSS positioning: *where does a
+GPS-dependent system begin trusting location, how can that trust be
+manipulated, and what physical or security decision follows?*
+
+No output is committed to as of 2026-07-31 — a talk and an article are both
+drafted, neither is scheduled, and nothing here is time-critical. See
+[docs/HANDOFF.md](docs/HANDOFF.md#where-this-is-going).
 
 ## Current work
 
@@ -12,7 +16,13 @@ delivered through the real-time server, does one of two things depending on how
 the binary was built:
 
 - **fortified build** (glibc `_FORTIFY_SOURCE` actually reaching the compiler)
-  — the process aborts. One packet is a remote DoS.
+  — the process aborts. Flown in the loop this is the **detectable** outcome
+  (EKF failsafe 4 s after the packet, four errors logged) and a **second
+  attack**: the aircraft cannot return home, so one packet sent at a moment of
+  the attacker's choosing lands it ~10 m from wherever it was. Fortification is
+  not a fix; it trades a silent integrity attack for a loud availability one.
+  See [What the abort does to the aircraft](research/README.md#what-the-abort-does-to-the-aircraft--measured)
+  and [The abort is a second attack](research/README.md#the-abort-is-a-second-attack-an-attacker-timed-forced-landing).
 - **unfortified build** — the base-station coordinates shift silently. The
   receiver keeps reporting **Q=1 (RTK fixed)** while emitting a position metres
   from truth. No crash, no AddressSanitizer report, and nothing in any log
@@ -48,7 +58,8 @@ end-to-end.
 
 ## Documents
 
-- [docs/talk-outline.md](docs/talk-outline.md) — the talk this is destined for: beat sheet, demo staging, RF delivery plan, and the hardware list
+- [docs/blog-1033-draft.md](docs/blog-1033-draft.md) — long-form article for a general audience, assuming no GNSS background. **Draft, unpublished**; its publication blockers are in an HTML comment at the top of the file
+- [docs/talk-outline.md](docs/talk-outline.md) — beat sheet, demo staging, RF delivery plan, and the hardware list. **Contingent** — no talk is committed to
 - [docs/eli5.md](docs/eli5.md) — the whole thing in plain language, no GNSS background assumed
 - [docs/rtk-rtklib-research-notes.md](docs/rtk-rtklib-research-notes.md) — background research, prior art, and the four disclosed decoder bugs
 - [docs/rtklib-claude-code-briefing.md](docs/rtklib-claude-code-briefing.md) — original task breakdown
