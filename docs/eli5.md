@@ -159,6 +159,84 @@ copy that overflows.
 - **Nothing watching** — the position is corrupted **silently**. This is the
   dangerous one.
 
+It is worth sitting with why the second one is worse, because the instinct is
+usually the opposite — a crash sounds like the bad outcome.
+
+We flew both. Same drone, same simulated flight, same malicious message; the
+only difference was which of the two versions of the software was in the loop.
+
+**When the software crashes**, the position simply stops arriving. The drone
+noticed in **four seconds**. It announced an error, gave up on the flight it had
+been told to make, switched itself into landing mode, and put itself on the
+ground half a minute later at a normal, gentle descent rate. It wrote nine
+separate complaints into its own log while doing it. Whatever else you want to
+say about that, the machine *knew*.
+
+**When the software corrupts the position instead**, the same drone flew the
+whole route, announced that it had arrived, and shut down normally — while
+sitting 1.4 metres from where it believed it was. Its log records no errors at
+all. Not one. It reported the GPS as "RTK FIXED" — the best possible quality —
+from takeoff to landing, without a flicker.
+
+That is the entire point. Every machine of this kind is built for "the sensor
+stopped responding." It is an expected situation with a plan attached: warn
+someone, stop, land. None of them are built for "the sensor is confidently
+wrong," because there is nothing to notice. No alarm can fire when every reading
+looks perfect.
+
+So the version that crashes is the *safer* one to be **detected** — and it is
+the version nobody ships.
+
+### But the crash is its own attack
+
+That is where we first stopped, and it was too generous to the crashing version.
+Look again at one line from the crashed drone's log:
+
+> *SmartRTL deactivated: bad position*
+
+The drone could not fly home, because it no longer knew where home was. Landing
+right there was not one choice among several. It was the only thing it could do.
+
+Now think about who decides *when* that happens. The attacker does — it happens
+the moment they send the message. So an attacker who can see the drone can wait
+until it is over a lake, or a river, or the far side of a fence, and then send
+one message to bring it down there.
+
+We measured how accurate that is. From a 15-metre hover the drone drifted
+**about 10 metres** sideways while it came down, always in one direction, never
+correcting. So the attacker gets to pick a **rough circle**, not a spot:
+
+- **Good enough for** a lake, a river, a field, a building site — anywhere that
+  is bigger than the error.
+- **Not good enough for** a particular lane of traffic or a specific rooftop.
+- **And 10 metres is the best case.** Our simulation had no wind at all. Real
+  wind, or a higher drone, or one that was moving when it was hit, all make the
+  landing spot less predictable.
+
+A human watching can still save it — the drone flies fine by hand once you stop
+asking it where it is, and the operator gets alarms. A drone flying an automated
+route with nobody watching cannot be saved.
+
+### So: two different attacks
+
+This is the honest way to put it. The two versions do not divide into "broken"
+and "fixed". They give an attacker **two different weapons**:
+
+|  | the version everyone runs | the version that crashes |
+|---|---|---|
+| what it does | moves the reported position | brings the aircraft down |
+| how precise | exact, attacker's choice | within about 10 metres, or worse |
+| how big | small — about 2 metres before it starts looking wrong | total: it stops flying |
+| can anyone tell? | **no** | yes, immediately |
+| good for | ruining survey data, farm machinery, landing accuracy — quietly, for weeks | knocking an aircraft out of the sky at a chosen moment |
+
+And the uncomfortable conclusion: **if what you want is to put a drone in a
+lake, the "safe" version is the better tool for the job.** Two metres of quiet
+error will not do it. A forced landing will.
+
+Turning the safety check on does not fix this bug. It swaps a quiet attack for a
+loud one. The actual fix is five lines of code, further down.
+
 We downloaded the actual programs people run — the official Windows tools, and
 the popular "Demo5" build most hobbyists use — and fed them the malicious
 message. Both accepted it without complaint and wrote a base station position
@@ -215,7 +293,9 @@ unauthenticated radio link feeding it.
 the receiver. We could not get the firmware without buying one, and the two
 possibilities lead to different headlines: either it corrupts the position
 silently like everything else measured, or it crashes and one message knocks a
-survey receiver off the air. Both are bad. We do not know which, and we are
+survey receiver off the air. As above, those are two different attacks rather
+than a bad case and a safe one — the crash is the detectable one, and also the
+one that brings an aircraft down on cue. We do not know which it is, and we are
 not going to guess.
 
 ## What is new here
@@ -243,6 +323,11 @@ here:
   ArduPilot documents as a drone GPS.
 - **What a vehicle does about it** — measured two independent ways, including
   one where the drone computes the false position for itself from the message.
+- **That the "protected" version is not protected, it is attacked differently.**
+  Flying both, the crashing version brings the drone down within about 10 metres
+  of wherever it was when the message arrived — at a moment the attacker picks,
+  with no ability to fly home. Turning the safety check on trades a quiet attack
+  for a loud one; it does not remove the bug.
 
 ## What is not proven
 

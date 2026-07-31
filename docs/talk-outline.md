@@ -1,5 +1,18 @@
 # Talk outline
 
+> **STATUS: contingent, not a plan of record.** As of 2026-07-31 no talk is
+> committed to — no CFP submitted, no venue, no deadline. This document is kept
+> current because the material is ready and the outline is cheap to maintain,
+> not because a talk is being prepared. The other possible output is the
+> long-form article at [blog-1033-draft.md](blog-1033-draft.md), which stands
+> alone and does not need the talk to happen.
+>
+> The checklist near the end assumes an active submission. **Ignore it unless a
+> talk is actually being pursued again** — its items (hardware to order, demo
+> rehearsal, stage fallbacks) are only binding under a live-demo commitment.
+> The authoritative record of the research itself is
+> [research/README.md](../research/README.md), which is independent of both.
+
 **Working title:** *Confidently Wrong: Moving a Drone With a Message About an
 Antenna's Name*
 
@@ -130,6 +143,63 @@ The most transferable insight in the talk.
   no `*_chk` either. On ARM. From a distribution whose policy is to enable it.
 - **Conclusion, stronger for having been surprised:** the abort is what you get
   by compiling it yourself with the right flags. It is not what anybody ships.
+- **Then invert it, and land §5 on this — with the table, not an argument.**
+  The instinct in the room will be that the crash column is the bad one. Both
+  columns are now flown, same aircraft, same profile, same `n1=211`, differing
+  only in the build (measured 2026-07-31):
+
+  | | fortified (aborts) | unfortified (ships) |
+  |---|---|---|
+  | GPS status | RTK FIXED → **none**, 87.5 s | **RTK FIXED the whole flight** |
+  | errors logged | 4 | **0** |
+  | failsafe | EKF variance → **auto LAND**, 4.0 s after the packet | **none** |
+  | outcome | on the ground in 33 s at 0.5 m/s | flew the leg, **reported arrival, 1.4 m from truth** |
+
+  **The build that crashes gives the vehicle something to act on. The build
+  everyone runs gives it a confident wrong answer and nothing to trigger on.**
+  - Scope it honestly if pressed: ArduCopter 4.7.0, EKF3, stock failsafe
+    params, one airframe. The direction is the claim; the seconds are
+    illustrative.
+
+## 5b. …and then take the comfort away (3 min)
+
+Do **not** let §5 land as "so compile it properly and you're fine." That is the
+wrong lesson and someone will leave with it. Turn immediately:
+
+- One line from the crashed aircraft's log does the work:
+  **`SmartRTL deactivated: bad position`**. No position means it cannot fly
+  home. Landing where it stands is not a choice, it is the only option.
+- **So who picks the moment? The attacker does.** One packet, whenever they
+  like, and the aircraft comes down near wherever it was. That is a
+  denial-of-flight primitive with attacker-chosen timing — and the *unfortified*
+  build cannot do it.
+- **Measured** (`land_drift.py`, same run): 15 m hover, 29 s descent,
+  **10.13 m of horizontal drift** between GPS loss and touchdown, monotonic —
+  it slides one way and never comes back. So the attacker picks a **circle of
+  tens of metres**, not a point.
+  - Works: a lake, a river, a field, the far side of a fence.
+  - Doesn't: a lane of traffic, a specific roof.
+  - **10 m is the floor** — zero wind, low hover, near-stationary. Say this
+    before anyone asks.
+- Recoverable by a live pilot (non-GPS modes still fly, alarms fire).
+  Unrecoverable on an autonomous BVLOS flight.
+
+**The slide to end on — two weapons, no safe column:**
+
+| | unfortified (ships) | fortified (DIY) |
+|---|---|---|
+| effect | position error | forced landing |
+| precision | exact | ~10 m and up |
+| magnitude | ~2 m before it degrades | total |
+| detectable | **no** | yes |
+| good for | corrupting survey/agriculture/landing quietly | taking an aircraft down on cue |
+
+- **The line:** *"if what you want is a drone in a lake, the hardened build is
+  the better tool."* Hardening swaps a silent integrity attack for a loud
+  availability one. **It is not a fix. The fix is the five-line clamp.**
+- *Possible demo beat:* this is a second, cheaper live run — no RF needed, and
+  it ends with the aircraft landing itself instead of flying to the wrong place.
+  Consider it as the fallback demo if the RF path is unreliable on the floor.
 
 ## 6. Is it in a product? (4 min)
 
@@ -347,7 +417,7 @@ The section that separates this from a bug writeup. Tell it as failures.
 - Issues open and unanswered since June 2026. Reporter offered to file for a
   CVE; no reply. Release branch untouched since December 2020.
 - **"Wait for the patch" is not advice on an unmaintained project.**
-- Show the fix: a three-line clamp. File the PR before the talk so the slide
+- Show the fix: a five-line clamp. File the PR before the talk so the slide
   reads *"here is the fix, filed, still unmerged."*
 - For operators, in priority order:
   1. Set the base coordinate **manually** where you can — the attack needs the
@@ -423,7 +493,10 @@ and we built an entire industry on a broadcast nobody signs."*
 
 | Question | Answer |
 |---|---|
-| "Isn't this just a crash?" | Not on any build anyone ships. Show the exit-0 evidence. |
+| "Isn't this just a crash?" | Not on any build anyone ships. Show the exit-0 evidence. Then turn it round: the crash is the outcome you'd *want*, because the vehicle notices. Silence is the failure nothing is built to catch. |
+| "Surely a crash mid-flight is worse than 2 m of error?" | Flown both. Crash: EKF failsafe in 4.0 s, auto-LAND, on the ground in 33 s at 0.5 m/s, 4 errors logged. Corruption: zero errors, RTK FIXED throughout, flew the leg and reported arrival 1.4 m off. Then §5b: the crash is worse in a different way — it's a forced landing on the attacker's schedule. |
+| "So just compile it with `_FORTIFY_SOURCE`?" | No — that's §5b. You'd be trading a silent 2 m error for a forced landing within ~10 m of wherever the attacker chose. Both are attacks. The fix is the five-line clamp. |
+| "How precisely can you place the forced landing?" | 10.13 m drift measured, one run, 15 m hover, **zero wind** — a floor, not a bound. Enough for a lake, not for a lane of traffic. Don't let it be quoted as ±10 m. |
 | "2 metres is nothing." | Nobody buys RTK to be within 2 m. It destroys the product's entire value while reporting maximum confidence. |
 | "Did you pick a lucky length?" | Yes — originally. That's §4. The demo now runs the rung that's bounded against any base. |
 | "Who actually runs RTKLIB?" | Emlid Reach, demo5 users, Debian's package on 12 architectures, RTKNAVI operators. §5 and §6. |
