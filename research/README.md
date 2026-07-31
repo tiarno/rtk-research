@@ -24,7 +24,7 @@ this turns out to be the most important fact here:
 
 | build | outcome |
 |---|---|
-| glibc `_FORTIFY_SOURCE` active (`-O1`+ and the flag actually reaching the compiler) | the fortified `strncpy` detects the overflow and **aborts the process** — one packet is a remote DoS |
+| glibc `_FORTIFY_SOURCE` active (`-O1`+ and the flag actually reaching the compiler) | the fortified `strncpy` detects the overflow and **aborts the process** — a remote DoS, repeatable for as long as the stream continues. On a vehicle this is a **second attack, not a mitigation**: the aircraft loses GPS, cannot return home, and lands within ~10 m of wherever the attacker chose to send the packet |
 | unfortified — **every build measured so far**: both Windows distributions, and Debian's own `rtklib` package on ARM | the write goes through **silently** — position corruption |
 
 In the unfortified case the interesting band is a small one. A shift of
@@ -518,6 +518,178 @@ resolves to:
 
 Note it is *glibc*, not ASan, that catches this. ASan itself stays silent
 throughout, because the overflow never leaves the enclosing `rtcm_t`.
+
+### What the abort does to the aircraft — measured
+
+The abort is measured to the process boundary above: exit 134 (SIGABRT), stack
+in `rtksvrthread` via `decoderaw`. `__chk_fail` calls `abort()`, which
+terminates the whole process rather than the decoding thread, so `rtkrcv` stops
+entirely — rover observation processing included, not just base decoding.
+
+The question that matters is what the *consumer* does about that. Measured
+2026-07-31 by running the closed loop in both columns, same `n1=211`, same
+flight profile, same base siting:
+
+    FORTIFY=1 HOLD=1 ./loop_demo.sh 211      # abort column
+    HOLD=1 ./loop_demo.sh 211                # silent column (control)
+
+**Read the harness note below first** — the naive version of this run measures
+the simulator, not the aircraft.
+
+#### Fortified: the vehicle notices in four seconds and puts itself down
+
+| t (log) | event |
+|---|---|
+| 48.6 s | armed, GUIDED, GPS `Status=6` (RTK FIXED) |
+| ~85 s | malicious 1033 spliced into the correction stream (*inferred* from the profile — the relay logs frame counts, not timestamps; the control run's parser puts the equivalent moment at 84.5 s) |
+| 87.5 s | **last GPS record. `Status` 6 → 0.** `*** buffer overflow detected ***`, SIGABRT, core dumped |
+| 91.4 s | `EKF3 lane switch 1`; `ERR EKF_PRIMARY ECode=1` |
+| 91.5 s | `ERR EKFCHECK ECode=2` → `EKF variance` → `ERR FAILSAFE_EKFINAV ECode=1` → **`MODE LAND (rsn 6)`**, `EKF Failsafe: changed to Land Mode` |
+| 98.6 s | `EKF3 IMU0 stopped aiding`, `IMU1 stopped aiding` |
+| 105.9 s | `SmartRTL deactivated: bad position` |
+| 120.6 s | `SIM Hit ground at 0.500060 m/s` |
+| 122.7 s | `Disarming motors` |
+
+**4.0 s from GPS loss to failsafe. 33.1 s from GPS loss to the ground**, at
+0.50 m/s — a normal landing rate, not a crash. The aircraft abandoned the
+commanded leg after flying 10.24 m of 29.93 m, which is the failsafe taking the
+vehicle away from the waypoint, not an attacker walking it off course.
+
+#### Unfortified control: nothing happens at all
+
+Same injection, same profile, same aircraft:
+
+| | fortified | unfortified |
+|---|---|---|
+| GPS `Status` | 6 → **0** at 87.5 s | **6 for the entire flight**, 49.2 → 188.2 s |
+| `ERR` records | 4 | **0** |
+| failsafes | EKF variance → LAND | **none** |
+| mode changes | auto → LAND at 91.5 s | only the commanded LAND at the end of the profile |
+| outcome | on the ground, disarmed, 33 s after GPS loss | flew the leg, reported arrival, **1.42 m from truth** |
+
+That is the whole argument in one table, and it is the reverse of the intuitive
+reading of the two columns. The build that *aborts* gives the vehicle a
+detectable event and a policy to run. The build that ships gives it a confident
+wrong answer and nothing to trigger on.
+
+Autonomy stacks are built for "the sensor went away" — it is a declared state
+with a failsafe attached, and here it fired in four seconds. Nothing is built
+for "the sensor is confidently wrong", because there is no signal to fire on:
+zero `ERR` records, zero mode changes, `Status=6` throughout.
+
+**So on detectability the hardened build wins outright, and it is the one nobody
+ships.** That is the finding. It is *not* a reason to call fortification a fix —
+see the next section, which is the other half of this result.
+
+### The abort is a second attack: an attacker-timed forced landing
+
+The section above is about *detection*, and on that axis the fortified build
+wins outright. It does not follow that the fortified build is safe, and reading
+it that way misses an attack.
+
+`SmartRTL deactivated: bad position` is the tell. With no position estimate the
+aircraft **cannot** return home. Land-where-you-are is not one option among
+several, it is the only one available — so **one packet, sent at a moment of the
+attacker's choosing, puts the aircraft on the ground near wherever it happened
+to be.** That is a denial-of-flight primitive with attacker-controlled timing,
+and it is a capability the unfortified build does not offer.
+
+"Near" is the whole question. Measured with `land_drift.py` on the same run:
+
+| | |
+|---|---|
+| altitude at failsafe | 14.99 m AGL |
+| descent time | 29.1 s at 0.52 m/s |
+| **horizontal dispersion, GPS loss → touchdown** | **10.13 m** |
+| dispersion, failsafe → touchdown | 9.42 m |
+| character of the drift | monotonic — max excursion *is* the touchdown point |
+
+With no horizontal position hold the aircraft slides for the whole descent, and
+it does not wander back. So the attacker selects a **circle of tens of metres**,
+not a point.
+
+**That 10 m is a floor, not an expected value.** SITL's default is zero wind,
+this was a low hover, and the aircraft had little residual velocity when the
+failsafe fired. Wind, altitude, or a vehicle moving when it is hit all increase
+dispersion — a longer descent is more time to drift.
+
+What that buys an attacker who can see the target:
+
+- **Works:** a lake, a river, a field of crops, a construction site, the far
+  side of a perimeter fence. Anything where tens of metres of error is still
+  inside the target.
+- **Does not work:** a specific lane of traffic, a particular rooftop, a chosen
+  vehicle. The dispersion is larger than the target.
+- **Defeated by a human:** the aircraft is still flyable in non-GPS modes and
+  the operator gets alarms. This is a live-pilot-recoverable attack and an
+  unrecoverable one for an autonomous BVLOS flight.
+
+#### Two attacks, not one bug and one mitigation
+
+The two build columns hand an attacker **different weapons**. Neither is the
+benign case:
+
+| | unfortified (ships) | fortified (compile it yourself) |
+|---|---|---|
+| effect | position error | forced landing |
+| precision | exact, chosen magnitude | ±10 m and up |
+| magnitude | bounded — the usable band is ~0.4–2.5 m before the solution degrades | total: the aircraft stops flying |
+| visible? | **no** — Q=1, zero `ERR`, nothing logged | yes — 4 `ERR` records, failsafe, alarms |
+| timing control | yes | yes |
+| best against | survey data, precision agriculture, landing accuracy, anything where 2 m matters and nobody checks | availability — taking an aircraft out of the air at a chosen moment |
+
+The uncomfortable consequence, stated plainly: **for the goal of putting an
+aircraft in the water, the hardened build is the more effective attack tool.**
+Two metres of silent error will not do it; a forced landing will. Hardening
+converts a silent integrity attack into a loud availability attack. That is a
+real improvement in *detectability* and it is not an improvement in *outcome* —
+the two are not the same thing, and the earlier framing in this repo treated
+them as if they were.
+
+So: report the detection result as the headline, because it is the surprising
+one and it holds. Do not report fortification as a fix. The fix is the clamp
+under "The fix"; fortification only changes which attack you are exposed to.
+
+#### Still not measured
+
+- **The crash loop on restart.** The attacker still controls the stream, and
+  `inject_1033.py` splices a 1033 after every 1005, so a restarted process
+  should walk into the next one and die again. Reasoned, not measured — the run
+  above ends with the aircraft on the ground.
+- **Dispersion as a distribution.** One run, one altitude, no wind. The 10.13 m
+  is a single sample, not a mean or a bound. A dispersion claim worth quoting
+  needs repeats across altitudes and wind settings.
+
+#### Harness note: why `HOLD=1` exists, and what the naive run measures
+
+The first attempt at this pointed SITL's GPS serial port straight at RTKLIB's
+TCP server, and produced a result that looks like an answer and is not one.
+RTKLIB aborts, the socket **closes**, and SITL's `tcpclient` port fails:
+
+```
+Closed connection on SERIAL3
+connect failed on port 5903 - Connection refused at 88242 retrying
+connect failed on port 5903 - Bad file descriptor
+```
+
+SITL then exits — the ~11-retry behaviour already noted in `loop_demo.sh`. The
+flight driver dies with `ConnectionResetError`, the log ends at 88.1 s, and
+**ArduPilot's failsafe logic never runs at all**. The simulator quitting is not
+the aircraft's response.
+
+It is also not what the failure looks like in the field. A receiver that crashes
+on a UART does not take the serial line down with it; the wires stay up and the
+bytes stop. `nmea_hold.py` reproduces that — it forwards normally, and when the
+producer dies it holds the client socket open and sends nothing:
+
+```
+12:15:21 UPSTREAM GONE after 136429 bytes -- holding the client socket open, sending nothing
+```
+
+With the proxy in place SITL logs no port error at all and the flight runs to
+completion. The proxy is proven transparent by the unfortified control run,
+which reproduces the known result through it unchanged (1.42 m here against the
+1.40 m recorded on 2026-07-27, base delta 1.800 m both times).
 
 ### What the receiver actually does about it
 
@@ -1034,7 +1206,9 @@ with a different toolchain (gcc/glibc vs. Apple clang).
 | `gnss_sim.c` | synthesises base+rover observables for two arbitrary positions |
 | `inject_relay.py` | on-path relay: splices the 1033 into a live stream, after every 1005 |
 | `mav_pos.py` | streams the simulated vehicle's ground truth to `gnss_sim` |
-| `loop_demo.sh` | the closed loop — packet to propeller in one run (`0` for the control) |
+| `loop_demo.sh` | the closed loop — packet to propeller in one run (`0` for the control). `FORTIFY=1` builds the abort column; `HOLD=1` inserts the keep-alive proxy that run requires |
+| `nmea_hold.py` | keeps the NMEA link up after RTKLIB dies, so the fortified run measures the aircraft's failsafe rather than SITL quitting on a closed port |
+| `land_drift.py` | the forced-landing attack: time to failsafe, descent, and the horizontal dispersion between GPS loss and touchdown — the attacker's targeting error. Refuses a log with no failsafe in it |
 | `loop_latency.py` / `.sh` | loop delay with no vehicle in it; `MODE=speed` checks the reported ground speed and course against a fed ramp |
 | `sign_check.py` | truth, GPS and EKF traces in one frame — which way the aircraft moved, and why |
 | `misalign_check.py` | the second defect: a declared length above 31 misaligns every field parsed after it, with a control at 20 |
@@ -1198,6 +1372,23 @@ Read these before quoting anything above.
   responds to a step in the position solution. The estimator parameters are now
   stock (`EK3_SRC1_VELXY 0` is gone), but the *receiver* is doing something a
   real one would not have to.
+- **The abort column is measured on ArduPilot SITL only, one vehicle, one
+  profile.** See "What the abort does to the aircraft". The 4.0 s to failsafe
+  and 33.1 s to ground are ArduCopter 4.7.0 with EKF3 and stock failsafe
+  parameters; another airframe, another estimator, or a non-default
+  `FS_EKF_ACTION` would give different numbers, and a fixed-wing or a ground
+  vehicle would behave differently again. The *direction* of the result — an
+  event the vehicle can act on, versus none — is the claim; the seconds are
+  illustrative. The crash-loop behaviour on restart is reasoned, not measured.
+- **The forced-landing dispersion is one sample.** 10.13 m, from a 15 m hover,
+  in **zero wind**, on a vehicle that was nearly stationary when the failsafe
+  fired. It is a floor and it is not a distribution: no repeats, no wind sweep,
+  no altitude sweep. Say "about 10 m in the one run measured, and more in any
+  real condition" — not "±10 m", which implies a bound that has not been
+  established.
+- **Fortification is not a fix and must not be reported as one.** It exchanges
+  a silent position-corruption attack for a loud forced-landing attack. The fix
+  is the clamp.
 - **Read the control run before quoting any closed-loop number.** Three harness
   defects each produced large, attack-shaped displacements with no attack
   present. `./loop_demo.sh 0` is the check, and it should land within
