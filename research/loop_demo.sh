@@ -76,6 +76,7 @@ cleanup() {
     for p in arducopter gnss_sim e2e_loop; do pkill -x $p 2>/dev/null; done
     pkill -f inject_relay 2>/dev/null
     pkill -f mav_pos 2>/dev/null
+    pkill -f nmea_hold 2>/dev/null
     [ -n "${holder:-}" ] && kill "$holder" 2>/dev/null
 }
 cleanup; sleep 1
@@ -110,9 +111,38 @@ rm -f "$T/gnss_sim" "$T/e2e_loop"
 gcc -I "$RTKLIB/src" -O2 -DSVR_REUSEADDR -o "$T/gnss_sim" "$HERE/gnss_sim.c" \
     "$RTKLIB"/src/*.c "$RTKLIB"/src/rcv/*.c -lm -lpthread || {
         echo "build failed: gnss_sim.c"; exit 1; }
-gcc -I "$RTKLIB/src" -O2 -DSVR_REUSEADDR -U_FORTIFY_SOURCE -o "$T/e2e_loop" "$HERE/e2e_harness.c" \
+# FORTIFY=1 builds the OTHER column: glibc's fortified strncpy detects the
+# overflow and aborts the process instead of corrupting the coordinate. Default
+# is unfortified, which is what every shipped build measured does and what the
+# stage demo must keep doing -- do not change the default.
+#
+# That run measures TWO things, and the second is the one people miss. The
+# aircraft detects the loss and lands itself (good -- it is the detectable
+# column), but it cannot RTL without a position, so the landing happens wherever
+# the attacker chose to send the packet. Analyse it with:
+#
+#   FORTIFY=1 HOLD=1 ./loop_demo.sh 211
+#   ./land_drift.py $(ls -t /tmp/rtk-loop/logs/*.BIN | head -1)
+#
+# HOLD=1 is REQUIRED with FORTIFY=1 -- see the proxy comment below.
+if [ -n "$FORTIFY" ]; then
+    FORT_FLAGS="-D_FORTIFY_SOURCE=2"
+else
+    FORT_FLAGS="-U_FORTIFY_SOURCE"
+fi
+gcc -I "$RTKLIB/src" -O2 -DSVR_REUSEADDR $FORT_FLAGS -o "$T/e2e_loop" "$HERE/e2e_harness.c" \
     "$RTKLIB"/src/*.c "$RTKLIB"/src/rcv/*.c -lm -lpthread || {
         echo "build failed: e2e_harness.c"; exit 1; }
+# A build that silently did not fortify would produce a clean run and the wrong
+# conclusion from it. Test the import, not the flag.
+if [ -n "$FORTIFY" ]; then
+    if nm -u "$T/e2e_loop" 2>/dev/null | grep -q __strncpy_chk; then
+        echo "fortified: __strncpy_chk present"
+    else
+        echo "FAILED: FORTIFY=1 but __strncpy_chk is absent -- not fortified" >&2
+        exit 1
+    fi
+fi
 [ -x "$T/gnss_sim" ] && [ -x "$T/e2e_loop" ] || { echo "build failed"; exit 1; }
 
 cat > "$T/loop.parm" <<'EOF'
@@ -179,6 +209,22 @@ NMEA_VEL=1 NMEA_TCP=:5903 "$T/e2e_loop" 127.0.0.1:5902 127.0.0.1:5911 "$RUN" 1 t
     > "$T/rtklib.log" 2>&1 &
 require_port 5903 "RTKLIB NMEA output" rtklib.log
 
+# HOLD=1 puts a keep-alive proxy between RTKLIB and SITL. Needed for any run
+# where RTKLIB is expected to DIE (see FORTIFY above): SITL's serial port is a
+# tcpclient, so a dead producer closes the socket, SITL retries ~11 times and
+# then exits -- and the simulator quitting is not the aircraft's failsafe. A
+# real receiver crashing on a UART leaves the line up and silent, which is what
+# the proxy reproduces. Off by default; transparent when on, which the
+# unfortified control run is there to demonstrate.
+GPS_PORT=5903
+if [ -n "$HOLD" ]; then
+    echo "### 3b. NMEA keep-alive proxy :5904 -> :5903 ###"
+    python3 "$HERE/nmea_hold.py" --listen 5904 --upstream 127.0.0.1:5903 \
+            --seconds "$RUN" > "$T/hold.log" 2>&1 &
+    require_port 5904 "nmea_hold proxy" hold.log
+    GPS_PORT=5904
+fi
+
 echo "### 4. SITL, taking its GPS from RTKLIB ###"
 # Two MAVLink endpoints, not one. SERIAL0 takes a single client at a time, so
 # the position feed and the flight driver sharing :5760 means whichever
@@ -191,7 +237,7 @@ echo "### 4. SITL, taking its GPS from RTKLIB ###"
 # connects to it unless the viewer is running, and the viewer only ever reads.
 "$BIN" --model quad --home "$HOME_LLH,0" --defaults "$DEFAULTS" \
        --serial0 tcp:5760 --serial1 tcp:5762 --serial2 tcp:5763 \
-       --serial3 tcpclient:127.0.0.1:5903 \
+       --serial3 "tcpclient:127.0.0.1:$GPS_PORT" \
        > "$T/sitl.log" 2>&1 &
 sleep 12
 
