@@ -37,11 +37,17 @@ enable, and Debian's own `rtklib` package — version 2.4.3.b34, built for 12
 architectures — imports no `*_chk` at all, on ARM included. The abort is what
 you get by compiling it yourself with the right flags, not what anyone ships.
 
-The attacker chooses the *scale* of the error, not its value: the declared
-length selects how many low-order bytes of the coordinate are zeroed, and each
-byte multiplies the quantum by 256. One rung — `n1=211`, a 2 m quantum — puts
-the error under 2 m against **any** base station, with no knowledge of its
-coordinates.
+The mechanism: `rectype`, the text field that gets oversized, sits 208 bytes
+before `pos` in the struct (offset 256 vs. 464, fixed across every ABI
+checked). Only the first 31 bytes of the declared text are ever read;
+`strncpy` copies to that buffer's NUL and zero-pads the rest out to the full
+declared length, so everything that reaches `pos` is padding, never attacker
+content — a zeroing primitive, not an arbitrary write. The attacker chooses
+the *scale* of the error, not its value: the declared length selects how many
+low-order (least-significant-mantissa) bytes of the coordinate get zeroed, and
+each additional byte multiplies the quantum by 256 — 8 more zeroed bits, not
+one more decimal digit. One rung — `n1=211`, a 2 m quantum — puts the error
+under 2 m against **any** base station, with no knowledge of its coordinates.
 
 The source of the defect is also present unchanged in
 [`emlid/RTKLIB`](https://github.com/emlid/RTKLIB) branch `reach`, the fork

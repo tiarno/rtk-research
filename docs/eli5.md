@@ -44,6 +44,17 @@ more digit multiplies the damage by 256. So there is no fine adjustment: the
 settings run roughly *millimetres, metres, kilometres, planets*. Two of those
 are useless to an attacker and one of them is rejected.
 
+**Why 256, and why jumps instead of a slide.** A computer doesn't store a
+coordinate as decimal digits. It stores it as a short stack of eight-bit
+slots, most important on top, least important on the bottom — closer to a
+weird set of nesting dolls than a row of digits. Blanking the bottom slot
+erases a fraction too small to see. Blank one more slot and the jump isn't
+ten times bigger, the way one more decimal digit would be — it's **256 times
+bigger**, because each slot is eight bits and every bit doubles the range.
+The length byte doesn't choose how much to erase in decimal. It chooses how
+many of these 256x slots to blank, one at a time, with nothing in between.
+That's the whole reason the dial has four rungs instead of a hundred.
+
 The useful setting is the "metres" one, and it is useful **everywhere**. It
 rounds the base station's position off to a two-metre grid, so wherever the
 base actually is, the lie lands somewhere under two metres — big enough to
@@ -331,13 +342,27 @@ here:
 
 ## What is not proven
 
-No real GPS hardware and no real aircraft were involved. This is all software
-on a laptop.
+No real GNSS receiver product and no real aircraft were involved.
 
-**Steps 1–5 were measured as one continuous run.** A real malicious message
-goes into the real GPS software, over a real serial link, and a wrong position
-comes out the far side as standard GPS sentences that a flight controller
-accepts and locks onto.
+**The radio hop is no longer theoretical.** Two small radios built around
+the same chip Emlid Reach uses (SX1262) sent the real malicious message over
+the air — one playing the attacker, one playing the rover — and the exact
+bytes that arrived were fed into RTKLIB's own, unmodified decoder. The
+coordinate corrupted by exactly the amount the math predicted, over a real
+radio link, not a wire.
+
+That is a separate, standalone proof, not yet joined to the rest of the
+chain below. Everything from here on — the GPS software producing a
+position, that position reaching a flight controller, the flight controller
+acting on it — has only been measured with the malicious message delivered
+over a wire, not over the air. Radio delivery and the rest of the chain are
+each proven; they have not yet been proven *together*, in one continuous
+run.
+
+**Steps 1–5 were measured as one continuous run, over a wire.** A real
+malicious message goes into the real GPS software, over a real serial link,
+and a wrong position comes out the far side as standard GPS sentences that a
+flight controller accepts and locks onto.
 
 **Step 6 has now been measured twice, two different ways, and the answers
 agree.** The first way hands the flight simulator a position error of the

@@ -98,9 +98,15 @@ Let it happen. Then start the talk. **Do not explain yet.**
   destination field is 64 bytes. **Nobody compares them.**
 - Show the three lines of `decode_type1033` with the unbounded `strncpy`.
 - Show `sta_t`: seven 64-byte text fields, three ints, and then — 464 bytes in —
-  `double pos[3]`, the base station's own coordinates.
+  `double pos[3]`, the base station's own coordinates. `rectype` (the field
+  that gets oversized) starts at offset 256, so the gap to `pos` is a fixed
+  208 bytes on every ABI checked (x86-64, armhf, armel, arm64, riscv64, ppc64).
 - **The twist:** the spill writes *zeros*, not attacker bytes. You cannot say
-  "the base is at the North Pole." You can only erase.
+  "the base is at the North Pole." You can only erase. Mechanically: only the
+  first 31 bytes of the declared text are ever read into the staging buffer;
+  `strncpy` copies to that buffer's NUL and then zero-pads out to the full
+  declared length. Everything past byte 31 is padding, not attacker content —
+  that's *why* it can only erase.
 - But erasing digits off a number changes it, and the result is still a
   perfectly plausible coordinate.
 - Then it self-triggers: the decoder returns 5, the server dispatches 5 to the
@@ -294,8 +300,32 @@ in the RadioLib API. Then transmit a packet whose payload is the RTCM3 1033
 frame. The rover's radio demodulates it like any other packet and hands it to
 the decoder.
 
-**This is the demo-able one.** Two Heltecs: one as the legitimate base, one as
-the attacker. Add the real Reach later.
+**Built and measured, not just planned — separate repo, `esp32-rtcm-injector`.**
+Two Heltec V3s, one running a serial-controlled TX firmware, one running the
+RX counterpart. The real attack frame (a legit 1005 establishing the true
+base position, then the malicious 1033) went out over real LoRa RF and was
+captured byte-perfect on the second board. Those captured bytes were fed
+into RTKLIB's own unmodified decoder (the same `input_rtcm3()` used
+everywhere else in this talk, not a reimplementation) and `sta.pos`
+corrupted from `-2694685.4730` to `-2694684.0000` — the exact `n1=211`
+number from §4's table, over the air instead of a wire.
+
+**One packet-size gotcha worth knowing before building the slide:** the
+malicious 1033 frame at the demo-max length (255) is 281 bytes — LoRa's hard
+payload limit is 255, so it **does not fit in a single packet.** `n1=211`
+does (237 bytes) — which is also already the rung this talk recommends (§4),
+so this isn't a new constraint, just a reason to be sure the slide uses 211
+and not 255 for the over-the-air version specifically.
+
+**What this validates, and what it doesn't yet.** Proven: real RF delivery
+into real RTKLIB, corrupting the stored coordinate by the predicted amount.
+Not yet done: this hasn't been stitched into the same continuous run as the
+wire-based full chain (§7's demo) — no autopilot has flown on a position
+that arrived over this radio link yet, and testing so far was an **open-air
+bench check** (~1 m, 2 dBm), not through the conducted coax/attenuator/
+enclosure path below. That path is still the plan for anything done in
+front of an audience; treat the RF proof above as "the mechanism works,"
+not as "the conducted demo is ready."
 
 ### Path B — UHF transparent serial (the professional path)
 
@@ -329,23 +359,34 @@ stage, and it costs nothing.
 
 ## Hardware needed
 
-**Tier 1 — the conducted RF demo (the minimum to do §8 live).**
+**Tier 1 — the conducted RF demo (the minimum to do §8 live).** The two
+Heltec V3s and the RF mechanism they carry are done (see §8) — everything
+else in this row is still not acquired, and the validation so far was
+open-air bench testing, not through this conducted path.
 
 | Item | Qty | ~Cost | Note |
 |---|---|---|---|
-| Heltec WiFi LoRa 32 V3 (SX1262, 863–928 MHz) | 2 | *owned* | legitimate base + attacker |
-| SMA-to-SMA coax jumpers, RG316 | 4 | $20 | conducted path |
-| SMA attenuators, 30 dB and 20 dB | 2 ea | $40 | keep levels sane, prevent front-end damage |
-| SMA 50 Ω terminations | 3 | $10 | terminate unused ports |
-| 2-way SMA splitter/combiner | 1 | $25 | inject alongside the legitimate transmitter |
-| Shielded enclosure or RF-tight bag | 1 | $60–200 | the containment story |
+| Heltec WiFi LoRa 32 V3 (SX1262, 863–928 MHz) | 2 | *owned* | legitimate base + attacker — **flashed, tested, working** |
+| SMA-to-SMA coax jumpers, RG316 | 4 | $20 | conducted path — **not yet acquired** |
+| SMA attenuators, 30 dB and 20 dB | 2 ea | $40 | keep levels sane, prevent front-end damage — **not yet acquired** |
+| SMA 50 Ω terminations | 3 | $10 | terminate unused ports — **not yet acquired** |
+| 2-way SMA splitter/combiner | 1 | $25 | inject alongside the legitimate transmitter — **not yet acquired** |
+| Shielded enclosure or RF-tight bag | 1 | $60–200 | the containment story — **not yet acquired** |
 | RTL-SDR v4 (receive only) | 1 | $40 | prove what is on the link; safe to own and use |
 
 **Tier 2 — hardware credibility (upgrades "simulated" to "real kit").**
+Emlid pricing corrected 2026-08-08 — the ~$300 figure below was stale by a
+wide margin; checked live against the Emlid store while sourcing hardware
+for the `esp32-rtcm-injector` repo. Current reality made this tier
+financially out of reach for now — see `esp32-rtcm-injector`'s
+`docs/HANDOFF.md` for the full lineup and the pivot to validating against
+real (free) RTKLIB software instead, which is what §8's over-the-air proof
+above actually did.
 
 | Item | Qty | ~Cost | Buys you |
 |---|---|---|---|
-| Emlid Reach M2 | 1 | ~$300 | **the actual target**; settles the fortified/unfortified question the source review could not |
+| Emlid Reach M2 (bare module, **no built-in radio**) | 1 | ~$749–1,023 | settles the fortified/unfortified question the source review could not — but its own matching LoRa radio accessory is discontinued; needs a 3rd-party UART radio |
+| Emlid Reach RS2+ (integrated, **built-in LoRa**) | 1 | ~$2,699 | the version that doesn't need a separate radio module — currently the cheapest Emlid unit with LoRa on board |
 | u-blox F9P board (ArduSimple simpleRTK2B) | 1 | ~$200 | real satellites, real observations feeding RTKNAVI |
 | Multi-band GNSS antenna + ground plane | 1–2 | $80–150 | needed by both of the above |
 | USB-TTL serial adapters (CP2102/FT232) | 2 | $20 | tap the serial link |
@@ -486,8 +527,17 @@ and we built an entire industry on a broadcast nobody signs."*
       looks like from the stage and what you say while fixing it
 - [ ] Copy a known-good `view.jsonl` somewhere durable before travelling — the
       first live run at the venue truncates the one in `$T`
-- [ ] Tier 1 hardware ordered and the conducted path bench-tested
-- [ ] Decide: does the Reach M2 get bought before or after acceptance?
+- [x] Two Heltec V3s flashed, tested against each other, and validated
+      against real RTKLIB source — see §8. **Still open:** the conducted
+      path itself (coax, attenuators, shielded enclosure) — not yet ordered,
+      not yet bench-tested. Testing so far is open-air bench range only.
+- [ ] Tier 1 conducted-path hardware (coax/attenuators/enclosure) ordered
+      and bench-tested
+- [ ] Decide on Tier 2: Emlid pricing checked live 2026-08-08 and came in
+      far above the ~$300 this checklist assumed (M2 alone ~$749-1,023, no
+      built-in radio; RS2+ with built-in LoRa ~$2,699) — parked for now,
+      not a pre-submission blocker. §8's over-the-air proof already
+      validates the mechanism against real RTKLIB without needing it.
 
 ## Known questions from the audience, with answers ready
 
@@ -503,6 +553,7 @@ and we built an entire industry on a broadcast nobody signs."*
 | "Real drones use an F9P, not RTKLIB." | Correct, and worth conceding. The F9P does RTK on-chip. Reach is the counter-example, and ArduPilot documents it. |
 | "Isn't that a niche configuration?" | No. It's not the compiled default, but of the seven example configs RTKLIB ships, the only one set up for real-time RTK is the only one that enables it. Post-processing and single-point modes have no stream to take a base position from. |
 | "Wouldn't it show up in the logs?" | No. Max verbosity logs 31 characters of attacker-chosen text and never the length; the coordinate adoption isn't traced at all. |
-| "Did you test real hardware?" | No. Say it plainly, then say exactly what *was* measured end to end. |
-| "Did you transmit?" | Conducted only, into a shielded enclosure. Never radiated. |
+| "Did you test real hardware?" | Split answer: no GNSS receiver product (no Reach, no F9P board) — but yes, real radios. Two Heltec V3s (the same SX1262 Reach uses) sent the actual attack over real LoRa RF into RTKLIB's own unmodified decoder, corrupting the coordinate by the predicted amount. Say exactly which half is real and which is still simulated; don't blur them together in either direction. |
+| "Did you transmit?" | For the stage demo: conducted only, into a shielded enclosure, never radiated. The bench validation that proved the LoRa mechanism works at all (§8) was low-power open-air at ~1 m, 2 dBm — say so if asked specifically about that, don't let "conducted only" cover testing it didn't apply to yet. |
 | "Is this a 0-day?" | No. Public since June 2026. What's new is where the spill lands and which builds fail silently. |
+| "Why can't the attacker pick any error size, not just four settings?" | Because the write zeroes whole bytes of an IEEE-754 double, low end first, and each extra byte is 8 more bits — a 256x jump in the smallest change that byte can represent. Decimal digits go up by 10x; these slots go up by 256x. That's why the usable settings are millimetres, metres, kilometres, planets and nothing in between. |
