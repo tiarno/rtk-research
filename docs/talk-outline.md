@@ -362,7 +362,9 @@ stage, and it costs nothing.
 **Tier 1 — the conducted RF demo (the minimum to do §8 live).** The two
 Heltec V3s and the RF mechanism they carry are done (see §8) — everything
 else in this row is still not acquired, and the validation so far was
-open-air bench testing, not through this conducted path.
+open-air bench testing, not through this conducted path. Full parts list,
+specific picks and prices in [tier1-hardware.md](tier1-hardware.md) — finalised
+2026-08-09, nothing ordered yet.
 
 | Item | Qty | ~Cost | Note |
 |---|---|---|---|

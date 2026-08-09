@@ -41,7 +41,9 @@ static void dump_sta(const char *when)
 {
     printf("  [%s]\n", when);
     dump_str("antdes",  rtcm.sta.antdes,  MAXANT);
+    dump_str("antsno",  rtcm.sta.antsno,  MAXANT);
     dump_str("rectype", rtcm.sta.rectype, MAXANT);
+    dump_str("recver",  rtcm.sta.recver,  MAXANT);
     dump_str("recsno",  rtcm.sta.recsno,  MAXANT);
     printf("    sta.pos  = %.4f %.4f %.4f\n",
            rtcm.sta.pos[0], rtcm.sta.pos[1], rtcm.sta.pos[2]);

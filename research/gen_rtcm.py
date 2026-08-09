@@ -113,6 +113,40 @@ def msg1033(staid=1234, antdes=b"", antsno=b"", rectype=b"", recver=b"",
     return frame(bytes(payload))
 
 
+def msg1007(staid=1234, antdes=b"", setup=0) -> bytes:
+    """
+    Type 1007 -- antenna descriptor only.
+
+    Field order from decode_type1007() in src/rtcm3.c: message number(12) +
+    staid(12) [3 bytes], antdes length n(8) [1 byte], antdes(n bytes),
+    setup(8) [1 byte]. Same "only the first 31 bytes are read, but the wire
+    must carry the full declared length" rule as 1033's descriptors.
+    """
+    w = BitWriter()
+    w.u(1007, 12).u(staid, 12)
+    payload = bytearray(w.bytes())
+    payload += bytes([len(antdes)]) + antdes
+    payload += bytes([setup])
+    return frame(bytes(payload))
+
+
+def msg1008(staid=1234, antdes=b"", antsno=b"", setup=0) -> bytes:
+    """
+    Type 1008 -- antenna descriptor and serial number.
+
+    Field order from decode_type1008(): message number+staid [3 bytes],
+    antdes length n(8), antdes(n bytes), setup(8), antsno length m(8),
+    antsno(m bytes).
+    """
+    w = BitWriter()
+    w.u(1008, 12).u(staid, 12)
+    payload = bytearray(w.bytes())
+    payload += bytes([len(antdes)]) + antdes
+    payload += bytes([setup])
+    payload += bytes([len(antsno)]) + antsno
+    return frame(bytes(payload))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)

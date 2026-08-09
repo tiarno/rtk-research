@@ -1,6 +1,88 @@
 # Handoff Notes
 
-**Session date:** 2026-07-27
+**Session date:** 2026-08-09
+
+## 2026-08-09: last research item closed, hardware list finalised, CFP landscape mapped
+
+No code path changed — this was a documentation, logistics and one closed-out
+research session. Read every doc in the repo plus `esp32-rtcm-injector`'s
+handoff to rebuild full context from scratch, then worked three threads.
+**Nothing committed to git** — everything below is in the working tree.
+
+**Research is now fully closed out.** The last open item in "Next steps,
+in the order I would take them" (below) — whether `decode_type1007`/`1008`
+carry the same unclamped-`strncpy` shape as 1033, and whether they reach
+`sta.pos` — is answered and measured, not just argued from offsets. New
+`research/check_1007_1008.py` runs both message types through the real
+decoder (WSL `~/RTKLIB`, pinned `180043e`) with `antdes`/`antsno` declared at
+255. Result: `sta.pos` and a `dgps` sentinel stay untouched in every case.
+Both fields sit too early in `sta_t` (offsets 128 and 192) to reach `pos`
+(464) or even leave the 560-byte struct. **Memory-safety only, no
+positioning impact, on either type** — confirmed, matching the prediction.
+Answers "why 1033?": of the five descriptor fields across all three message
+types, only `rectype`/`recver`/`recsno` sit after `pos`, and all three
+belong to 1033. Written up in `research/README.md` (new section, two
+cross-references updated from "not examined here", Files table), plus
+`harness.c` (now also dumps `antsno`/`recver`) and `gen_rtcm.py` (gained
+`msg1007`/`msg1008`). **Still open, and it's a decision not a task:**
+whether to file the misalignment defect as its own GitHub issue — see
+"Still to do" under Disclosure timeline, below, unchanged this session.
+
+**Chose a direction: pursue the talk** (of the two possible outputs — the
+article was not touched this session). Two threads followed from that:
+
+- **Tier 1 RF hardware finalised.** Full parts list (~$165–170) against the
+  spec in [talk-outline.md](talk-outline.md#hardware-needed):
+  `docs/tier1-hardware.md`, linked from the Tier 1 table there. **Nothing
+  purchased** — no purchasing capability this session, and two things are
+  flagged in that doc as worth checking before buying: the splitter's actual
+  passband at 863–928 MHz specifically (not just its headline range), and
+  the terminator listing's pack size.
+- **CFP/venue landscape mapped**, broadly — roughly twenty hacker-security
+  and GNSS/PNT conferences checked for live 2026/2027 CFPs as of today. Full
+  comparison in `docs/cfp-options.md`. Headline finding: **ION ITM/PTTI
+  2027** (Anaheim, Jan 25–28) has an open CFP, abstract due **Oct 2, 2026** —
+  the strongest topical/prestige match, since it puts the finding in front of
+  the actual GNSS/PNT industry rather than a hacker-con approximation of it.
+  Different format though: written abstract, peer review optional. **Ekoparty
+  2026** (Buenos Aires, Oct 7–9) is open now too and is the closest cultural
+  fit to the talk as already built — lowest rewrite cost of any option.
+  Nothing submitted, nothing decided.
+
+**Disclosure status, live-checked this session:** `gh issue view 799` — still
+**OPEN**, no maintainer reply since the 2026-07-27 comment (13 days silent as
+of today), consistent with no commit to the release branch since
+2020-12-29. Nothing new to act on; the patch PR is still deliberately held.
+
+**Files changed, uncommitted:**
+
+| file | change |
+|---|---|
+| `research/check_1007_1008.py` | new — measures whether 1007/1008 reach `sta.pos` |
+| `research/README.md` | new section on the 1007/1008 result; two cross-references updated; Files table entry |
+| `research/harness.c` | `dump_sta` now also prints `antsno`/`recver` |
+| `research/gen_rtcm.py` | added `msg1007`/`msg1008` frame generators |
+| `docs/HANDOFF.md` | this entry; "Next steps" item 3 marked DONE |
+| `docs/talk-outline.md` | Tier 1 hardware row now links to `tier1-hardware.md` |
+| `docs/tier1-hardware.md` | new — finalised Tier 1 RF parts list |
+| `docs/cfp-options.md` | new — CFP/venue comparison and review |
+
+**Next steps, in priority order:**
+
+1. **Pick a CFP** — ITM/PTTI's Oct 2 deadline is the nearest hard one on the
+   table; Ekoparty is open now with no deadline surfaced yet; S4x27 (Aug 31)
+   and Black Hat Singapore (opens Aug 26, closes Oct 16) are the other live
+   windows. See `docs/cfp-options.md` for the full tradeoff.
+2. Resolve the two open hardware questions in `docs/tier1-hardware.md`, buy
+   the parts, bench-test the conducted path once they arrive.
+3. **Rehearse the failed-start scenarios** — still the binding constraint on
+   the demo per earlier sessions; untouched again this session.
+4. Record the length-sweep demo clip (do not run it live).
+5. Decide whether the misalignment defect gets filed as its own issue.
+
+---
+
+**Previous session:** 2026-07-27
 
 ## 2026-07-27, later: the demo has a screen
 
@@ -468,9 +550,17 @@ report fortification as a fix anywhere* — the fix is the clamp. Written up in
   across altitude and `SIM_WIND_SPD` would turn it into a claim worth quoting;
   right now it is a floor. If §5b gets challenged, this is the gap.
 
-**3. `decode_type1007` / `1008` — ~1 hour.** Same harness, different message
-type. Expect a negative result worth stating precisely: those fields stop short
-of `pos`, so memory-safety only, no positioning impact. It answers "why 1033?"
+**3. `decode_type1007` / `1008` — DONE 2026-08-09.** Same harness, different
+message type. The negative result held exactly as expected: both share the
+same unclamped-`strncpy`/zero-padding shape as 1033, but `antdes` (offset 128)
+and `antsno` (offset 192) sit too early in `sta_t` to reach `pos` at 464, or
+to leave the struct at all, even at the maximum legal declared length (255).
+Memory-safety only, no positioning impact, on either type — confirmed by
+measurement (`check_1007_1008.py`), not just offset arithmetic. Answers "why
+1033?": of the five descriptor fields across all three types, only
+`rectype`/`recver`/`recsno` sit after `pos`, and all three belong to 1033.
+Written up in `research/README.md` under "`decode_type1007`/`1008`: same
+shape, measured to not reach `pos`".
 
 **4. A patch PR to RTKLIB — nearly free.** The fix is a **five-line** clamp (one
 per declared length; `research/README.md`, "The fix"). It will probably sit

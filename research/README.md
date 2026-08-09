@@ -126,6 +126,49 @@ Maximum reach is 639 bytes from a struct base sitting ~237 KB inside a
 ~240 KB `rtcm_t`. **The overflow never escapes `rtcm_t`** — no heap metadata,
 no saved return address, no function pointer, no adjacent allocation.
 
+### `decode_type1007`/`1008`: same shape, measured to not reach `pos`
+
+FuzzingLabs' report also notes the same unclamped-length pattern in
+`decode_type1007` and `decode_type1008` (see "Relationship to the FuzzingLabs
+disclosure" below), without saying where it lands. Read at
+[src/rtcm3.c:504](https://github.com/tomojitakasu/RTKLIB/blob/rtklib_2.4.3/src/rtcm3.c#L504)
+and [:537](https://github.com/tomojitakasu/RTKLIB/blob/rtklib_2.4.3/src/rtcm3.c#L537),
+both carry it — `decode_type1007` writes `antdes` via an unbounded
+`strncpy(rtcm->sta.antdes,des,n)`; `decode_type1008` writes both `antdes` and
+`antsno` the same way. Same read/write asymmetry as 1033 too: the read loop
+caps at 31 bytes, `strncpy` copies to that NUL and zero-pads out to the full
+declared `n`/`m` — a truncation primitive, not a controlled write, exactly as
+for `rectype`.
+
+The table above already answers where it lands: `antdes` sits at offset 128,
+`antsno` at 192. Their maximum reach at the largest legal declared length
+(255) is 383 and 447 — short of `pos` at 464 by 81 and 17 bytes respectively,
+and short of the end of `sta_t` itself (560 bytes) by 177 and 113. Neither
+field can reach `pos`, and neither can escape `sta_t` into `dgps` the way
+1033's `recsno` does. That's arithmetic on measured offsets, not yet a
+measurement of the real decoder — `check_1007_1008.py` is that measurement,
+built the same way as everything above: generate well-formed 1007/1008
+frames with `antdes`/`antsno` declared at 255, run them through the real
+`input_rtcm3`, and check `sta.pos` and the `dgps` sentinel afterward.
+
+```
+1007, antdes=255    sta.pos = -2694685.4730 -4293642.3660 3857878.9240   dgps = 0x4141414141414141
+1008, antdes=255    sta.pos = -2694685.4730 -4293642.3660 3857878.9240   dgps = 0x4141414141414141
+1008, antsno=255    sta.pos = -2694685.4730 -4293642.3660 3857878.9240   dgps = 0x4141414141414141
+```
+
+Confirmed, not just predicted: `sta.pos` stays at truth and the `dgps`
+sentinel stays intact in every case. `decode_type1007` and `decode_type1008`
+share the exact same missing-clamp shape as `decode_type1033` — same
+zero-padding truncation primitive, same self-triggering absence of a bounds
+check — but `antdes` and `antsno` are placed too early in `sta_t` to reach
+`pos`, or to leave the struct at all, at any legal declared length. **Memory
+safety only, in-struct only, no positioning impact, on either type.** That
+answers "why 1033?": of the five descriptor fields across all three message
+types, `rectype`, `recver` and `recsno` are the only ones positioned after
+`pos` — and all three belong to 1033, since 1007/1008 don't carry a receiver
+descriptor at all, only antenna ones.
+
 ## Why this is a positioning bug, not a memory-safety bug
 
 `rectype` with `n1 >= 209` zeroes `sta.pos[3]` — the base-station ECEF
@@ -1212,6 +1255,7 @@ with a different toolchain (gcc/glibc vs. Apple clang).
 | `loop_latency.py` / `.sh` | loop delay with no vehicle in it; `MODE=speed` checks the reported ground speed and course against a fed ramp |
 | `sign_check.py` | truth, GPS and EKF traces in one frame — which way the aircraft moved, and why |
 | `misalign_check.py` | the second defect: a declared length above 31 misaligns every field parsed after it, with a control at 20 |
+| `check_1007_1008.py` | does the same unclamped-`strncpy` shape in `decode_type1007`/`1008` reach `sta.pos` — measured negative: `antdes`/`antsno` sit too early in `sta_t` to reach it or to leave the struct |
 | `check_clamp.sh` | does the proposed fix work — stock vs. clamped on the same streams, plus UBSan with the control firing first |
 | `check_fork.sh` | is a given RTKLIB fork still vulnerable — unclamped copy, `offsetof(sta_t,pos)`, and whether the real-time path adopts the coordinate unguarded |
 | `check_offsets.py` | does the payload length transfer to other architectures — `sta_t` layout across six ABIs, by cross-compilation, with nothing run on the target |
@@ -1260,8 +1304,11 @@ guard; unauthenticated reachability via NTRIP/serial with a computable CRC;
 containment within the single `rtcm_t` allocation; ASan blindness and the
 need for UBSan; "corrupts adjacent `sta_t`/`rtcm_t` members". All of it holds.
 Their report also notes the same unclamped pattern in `decode_type1007`
-(`rtcm3.c:469`) and `decode_type1008` (`:507`), which is not examined here.
-Those two line numbers are quoted as they appear in their report and do not
+(`rtcm3.c:469`) and `decode_type1008` (`:507`) — now examined here, see
+"`decode_type1007`/`1008`: same shape, measured to not reach `pos`" above:
+same missing clamp, confirmed to stay within `sta_t` and short of `pos` at
+any declared length, so memory-safety only on both. Those two line numbers
+are quoted as they appear in their report and do not
 resolve against the tree measured here, where the functions begin at 504 and
 537 — presumably a different checkout on their side.
 
@@ -1283,7 +1330,8 @@ throughout as memory corruption. Specifically new here:
 - Their PoC drives `n` (the `antdes` length), which maxes out at offset 383 and
   **cannot reach `pos` at 464**. Only `rectype`, `recver` and `recsno` can. For
   the same reason `decode_type1007`/`1008`, which write only the earlier
-  fields, cannot reach it either — 1033 is the only one of the three that can.
+  fields, cannot reach it either — 1033 is the only one of the three that can
+  (now measured, not just argued from offsets — see above).
 - A second, unrelated defect in the same function: a declared length above 31
   misaligns every field parsed after it, because the sequential walk advances
   by at most 31 bytes while the wire format carries the full length. Not a
