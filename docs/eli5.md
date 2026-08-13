@@ -312,10 +312,26 @@ everything else we tested.
 
 That is still not the full answer. Emlid sells other, newer receivers in the
 same product line — the ones the earlier version of this write-up had in
-mind — and we have not checked those; only the older model. And what we did
-is read the compiled program carefully, not power one up and attack it live.
-Both are worth being precise about rather than rounding up to "the receiver
-is hacked."
+mind — and we have not checked those; only the older model.
+
+**Second update, same day: we ran it.** Reading the program tells you what
+it would do; it doesn't prove it happens. So we found a way to actually
+run this exact program — the one taken from the real firmware, not a copy
+we built — using a tool that lets a different kind of computer pretend to be
+the chip the receiver uses. We pointed it at the real settings the receiver
+ships with, sent it the same fake correction message over a small local
+network connection standing in for the radio link, and then asked the
+program itself, the same way an operator would, what it currently believed
+the base station's position to be. It answered with a position **1.473
+metres from the truth** on one axis — a live, watched, no-guessing
+confirmation of the same distance this project's other measurements
+predicted. Nothing crashed and nothing complained.
+
+So: read *and* run, for the older model. Two things remain open — the
+current models (M2/RS2+) aren't checked at all, and "run" here means inside
+an emulator standing in for the chip, not the receiver itself powered up on
+a desk. Both are worth naming precisely rather than rounding up to "the
+receiver is hacked."
 
 ## What is new here
 
@@ -350,10 +366,13 @@ here:
 
 ## What is not proven
 
-No real aircraft were involved, and no receiver was ever powered up and
-attacked live. One real receiver's actual firmware was opened up and read,
-which is not nothing, but it is not the same claim — see "Is this in
-anything you can buy?" above for exactly what that does and doesn't settle.
+No real aircraft were involved, and no physical receiver was ever powered up
+and attacked live. One real receiver's actual firmware was opened up and
+read, *and* separately run — its own program, its own settings, actually
+executing and reporting the corrupted position back — but "run" there means
+inside emulation standing in for the receiver's chip, not the receiver
+itself on a desk. See "Is this in anything you can buy?" above for exactly
+what each of those does and doesn't settle.
 
 **The radio hop is no longer theoretical.** Two small radios built around
 the same chip Emlid Reach uses (SX1262) sent the real malicious message over

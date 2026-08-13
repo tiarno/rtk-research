@@ -449,13 +449,11 @@ now including one obtained the way an actual customer would obtain it.
   lead, so that stopped rather than continued. Unresolved, not ruled out.
 - **v2.18.1, dated 2019-06-27.** Whether a current Reach Plus firmware build
   differs is unchecked.
-- **Static, not dynamic.** The vulnerable code's presence and lack of
-  fortification are confirmed by reading the binary, not by feeding it a
-  malicious stream and watching `sta.pos` move. Nothing here was executed —
-  aarch64 on an x86_64 host would need `qemu-user` or real ARM hardware, and
-  the crt-only debug info in this particular build (see below) means struct
-  offsets weren't independently re-derived from it either; that inference
-  still rests on the six-ABI table above, which does include arm64.
+- ~~Static, not dynamic~~ — **resolved same day, see "Dynamic confirmation"
+  below.** The crt-only debug info point still stands: struct offsets
+  weren't independently re-derived from this binary via DWARF, and that
+  inference still rests on the six-ABI table above (which does include
+  arm64) rather than this specific binary.
 - **The library is "not stripped," which overstates what that buys.** `file`
   reports `with debug_info` — true, but the only DWARF present is for the
   linked-in `crti.S`/`crtn.S` C-runtime stubs, not RTKLIB's own source. The
@@ -486,6 +484,83 @@ name." `str2str` and `convbin` are laid out the same way
 (`/usr/bin/RTKLIB/app/{str2str,convbin}/gcc/`) and weren't individually
 pulled and checked, but the pattern is the same build.
 
+### Dynamic confirmation: the shipped binary, running, live
+
+Everything above is the binary at rest. This is the binary executing,
+unmodified, against a correction stream built the same way every other
+harness in this project builds one — and the result read back through the
+firmware's own official interface, not inferred from disassembly.
+
+**Tooling, no root anywhere in the chain.** `apt-get download
+qemu-user-static` fetches the `.deb` without installing it (root is only
+needed for `apt-get install`, not `download`); `dpkg-deb -x` unpacks it into
+an ordinary directory, giving a working `qemu-aarch64-static` binary
+(v2.11.1) invoked by full path. Same no-root discipline `check_image.sh`
+already uses for the filesystem side, extended to execution.
+
+**The command:**
+
+```sh
+qemu-aarch64-static -L <extracted-rootfs> ./rtkrcv -s -p 9001 -t 5 -o ../rtk.conf
+```
+
+run from `rtkrcv`'s own original directory inside the extracted image
+(`usr/bin/RTKLIB/app/rtkrcv/gcc/`), so its own relative config paths resolve
+exactly as they would on the device. `-L` points qemu's dynamic linker at
+the extracted rootfs, so `ld-linux-aarch64.so.1`, `libc.so.6`, `libm.so.6`,
+`libpthread.so.0`, and `librtk.so` all resolve from the real firmware's own
+`/lib` and `/usr/lib` — nothing recompiled, nothing substituted. `-o
+../rtk.conf` is the **actual shipped config file**, unmodified: `inpstr2`
+(the correction input) is already `tcpcli`, `localhost:9000`, format
+`rtcm3`, with `ant2-postype=rtcm` — i.e. "adopt the base position from
+RTCM" — exactly the production configuration, not something rigged up for
+this test.
+
+**The correction stream** is a small local TCP server
+(`corr_server.py`, not checked in) that `rtkrcv` connects out to as a
+client, playing back `gen_rtcm.py`'s output: six seconds of clean `msg1005`
+traffic first (let the server settle on the true position), then fifteen
+seconds of the malicious `n1=211` `msg1033` interleaved with continued
+`msg1005` — the same "real base repairs it, attacker re-sends" pattern used
+throughout this project. No rover observation stream was served
+(`inpstr1`); that isolates the correction-adoption mechanism from needing a
+full kinematic solution, deliberately, the same reasoning as every other
+harness here that drives `decode_rtcm3` directly.
+
+**The result, read from `rtkrcv`'s own telnet console** (port 9001, its own
+`status` command, after its own configured password) — not memory
+inspection, not a debugger, the same interface a real operator would use:
+
+```
+rtklib version               : 2.4.3 Emlid b28
+# of rtcm messages base      : 1005(21),1033(15)
+pos xyz (m) base             : -2694684.000,-4293642.366,3857878.924
+```
+
+Against the true position `gen_rtcm.py` sets, `(-2694685.4730, -4293642.3660,
+3857878.9240)`: **X moved by 1.473 m, Y and Z untouched** — the predicted
+`n1=211` behavior (zeroing low-order bytes of one coordinate word, bounded
+under 2 m) exactly, on the real binary, for the first time. Message counts
+line up exactly with what was sent (21 `1005`s across both phases, 15
+`1033`s in phase two). The console's `error` command reports nothing — same
+silence as everything else measured. The 1.3 MB trace file (`-t 5`, maximum
+verbosity) contains the exact diagnostic line already characterized from
+source alone: `rtcm3 1033: ant=TRM59800.00: rec=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA::`
+— the truncated 31-byte descriptor, repeated once per message, and nothing
+anywhere in it about the position changing. `shutdown` from the console
+closes it cleanly; no crash.
+
+**What this does and doesn't add.** It closes the static-vs-dynamic gap for
+this specific firmware — the code doesn't just look reachable and
+unfortified in a disassembler, it corrupts a live process's own
+console-reported state when fed the packet, through the firmware's own
+config and its own network stack. It does not touch the other open items:
+still Reach Plus, not M2/RS2+; still this one 2019 build; and it's
+`qemu-user` CPU emulation, not physical Reach silicon — a materially weaker
+gap than "static analysis," since the actual compiled instructions from the
+actual shipped binary are what executed, but a gap worth naming rather than
+rounding to zero.
+
 Reproduce:
 
 ```sh
@@ -496,6 +571,21 @@ debugfs -R "dump /usr/lib/librtk.so ./librtk.so" rootfs.img
 ./check_binary.sh ./librtk.so                      # 1033 decoder present? fortified?
 debugfs -R "dump /usr/bin/RTKLIB/app/rtkrcv/gcc/rtkrcv ./rtkrcv" rootfs.img
 readelf -d ./rtkrcv | grep NEEDED                  # confirms rtkrcv actually loads librtk.so
+
+# dynamic run, no root:
+apt-get download qemu-user-static && dpkg-deb -x qemu-user-static*.deb ./qemu
+python3 gen_rtcm.py benign.bin --benign
+python3 gen_rtcm.py attack.bin --len 211
+# serve benign.bin then attack.bin on 127.0.0.1:9000 (a ~15-line TCP server:
+# accept, send benign.bin on a loop for a few seconds, then attack.bin)
+cd rootfs/usr/bin/RTKLIB/app/rtkrcv/gcc
+../../../../../../../qemu/usr/bin/qemu-aarch64-static -L ../../../../../../../rootfs \
+    ./rtkrcv -s -p 9001 -t 5 -o ../rtk.conf &
+python3 -c "
+import socket,time
+s=socket.create_connection(('127.0.0.1',9001)); s.settimeout(2)
+s.sendall(b'admin\r\nstatus\r\n'); time.sleep(1)
+print(s.recv(65536).decode(errors='replace'))"
 ```
 
 The extracted image and filesystem (~2.5 GB) are not checked in; this section

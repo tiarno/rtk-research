@@ -818,18 +818,49 @@ Neither is whether Emlid's current firmware differs from this 2019 build.
 stronger than that; it hasn't become "the product line behaves this way"
 across the board.
 
+Later the same day: reading the binary says what it *would* do. I wanted to
+watch it actually do it. `qemu-aarch64-static` — downloaded as a `.deb` and
+unpacked by hand, no root needed anywhere in this — will run one aarch64
+binary under emulation on an ordinary x86 machine, resolving its shared
+libraries from a directory you point it at. Pointed that directory at the
+Reach Plus filesystem, ran the real `rtkrcv` binary from the real firmware
+against its own real configuration file, and fed it a correction stream
+carrying the same malicious message over a local TCP connection standing in
+for the radio link. Then asked `rtkrcv` itself — its own console, the same
+interface a real operator would use — what it currently believed the base
+station's position to be:
+
+```
+pos xyz (m) base : -2694684.000,-4293642.366,3857878.924
+```
+
+The true position was `-2694685.4730,-4293642.3660,3857878.9240`. One axis
+moved **1.473 metres**, live, watched, on the actual shipped program. The
+message counters matched what I'd sent exactly, and the console's own error
+log had nothing in it. I shut it down cleanly afterward with its own
+`shutdown` command; nothing crashed.
+
+That closes the gap this section opened with — not "the source is
+affected," and not "the firmware contains it," but "I ran it and watched it
+happen." What's still open: Reach M2 and RS2+ remain unchecked, and this was
+emulation, not the receiver itself powered on. Both matter; neither erases
+what the emulator run settled.
+
 ## Part 15: What I did not do
 
 Worth being blunt about, because a lot of security writing is vaguer here than it
 should be.
 
 - **No aircraft, real or simulated-into-the-real-world, was ever attacked
-  live.** Two things have since happened that this draft doesn't narrate yet:
-  two small real radios sent the real malicious message over the air into
-  RTKLIB's own unmodified decoder (see `research/README.md`, "Over a serial
-  link" / the radio delivery work), and one real receiver's firmware was
-  downloaded and read (Part 14, above). Neither is a live attack on a
-  powered-on device with a propeller attached.
+  live.** Three things have since happened that this draft doesn't narrate
+  at the top yet: two small real radios sent the real malicious message
+  over the air into RTKLIB's own unmodified decoder (see
+  `research/README.md`, "Over a serial link" / the radio delivery work);
+  one real receiver's firmware was downloaded and read (Part 14, above);
+  and that same receiver's actual binary was then run, under emulation,
+  against a real correction stream, with its own console confirming the
+  live corruption (Part 14, later addendum). None of the three is a live
+  attack on a powered-on device with a propeller attached.
 - **One base station, one rover, one data set**, and an old one. Whether the same
   invisibility holds across other satellite constellations and modern
   multi-frequency receivers is untested.

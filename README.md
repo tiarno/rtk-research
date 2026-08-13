@@ -59,9 +59,15 @@ product.** A firmware image Emlid serves publicly with no purchase or login
 Emlid's own build — checked directly: the 1033 decoder is compiled in
 (inlined into `decode_rtcm3`, confirmed by cross-referencing its trace
 strings) and the library imports zero fortified libc symbols anywhere, so the
-corruption is silent there too. Reach M2 and RS2+, the currently-sold units,
-are not yet checked. See
-[research/README.md](research/README.md#the-shipped-firmware-not-just-the-source).
+corruption is silent there too. **Later the same day, run rather than just
+read:** `qemu-aarch64-static` (downloaded and unpacked with no root) ran
+that firmware's actual `rtkrcv` binary against its own real config and a
+real correction stream — its own console reported the base position moving
+1.473 m, live, message counts matching exactly, nothing in the error log.
+Reach M2 and RS2+, the currently-sold units, are still not checked. See
+[research/README.md](research/README.md#the-shipped-firmware-not-just-the-source)
+and, for the dynamic run, "Dynamic confirmation: the shipped binary,
+running, live" in the same file.
 
 The second is a software answer to the question the project started from: can a
 precision GNSS rover be manipulated while it continues to report a healthy fix?

@@ -121,10 +121,18 @@ automates (`dd` + `debugfs`, no root), turned up `librtk.so` — RTKLIB 2.4.3,
 Emlid's build. `research/check_binary.sh`, run directly against the
 extracted library, confirms the 1033 decoder present and zero fortified
 symbols. See `research/README.md`, "The shipped firmware, not just the
-source," for the full trail, including why no fortification was found. Reach
-M2/RS2+ (the current product line) and every non-Emlid vendor are still
-unfingerprinted — this closes one instance of the exercise, not the exercise
-itself.
+source," for the full trail, including why no fortification was found.
+
+**Same day, later: run, not just read.** `qemu-aarch64-static` (downloaded
+as a `.deb`, unpacked with `dpkg-deb -x`, no root) ran the actual `rtkrcv`
+from that firmware against its own real config and a synthetic correction
+stream; its own console reported the base position moving 1.473 m, live.
+See `research/README.md`, "Dynamic confirmation: the shipped binary,
+running, live."
+
+Reach M2/RS2+ (the current product line) and every non-Emlid vendor are
+still unfingerprinted — this closes one instance of the exercise, both
+statically and now dynamically, not the exercise itself.
 
 ---
 

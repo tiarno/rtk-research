@@ -225,11 +225,19 @@ wrong lesson and someone will leave with it. Turn immediately:
   trace-string references in the disassembly) and the library imports zero
   fortified libc symbols. Same result as everything else measured: silent
   corruption, on an actual shipped product's actual firmware.
+- **Same day, later — watched it happen, not just read it.** Ran that exact
+  binary under `qemu-aarch64-static` (no root: downloaded as a `.deb`,
+  unpacked with `dpkg-deb -x`), against its own real config and a real
+  correction stream. Its own console: base position moved 1.473 m, live,
+  message counters matching exactly what was sent, nothing in the error log.
+  Full account: `research/README.md`, "Dynamic confirmation."
 - **Be precise about what's still a limit.** That's Reach Plus, an older
-  model, firmware from 2019. **Reach M2 and RS2+ — the models currently for
-  sale — are not yet checked**; their firmware isn't at the same predictable
-  URLs. Say "confirmed for Reach Plus's shipped firmware, source-only for
-  the current line" — not "Reach is hacked."
+  model, firmware from 2019, run under emulation rather than physical
+  silicon. **Reach M2 and RS2+ — the models currently for sale — are not yet
+  checked**; their firmware isn't at the same predictable URLs. Say
+  "confirmed, statically and dynamically, for Reach Plus's shipped firmware
+  under emulation; source-only for the current line" — not "Reach is
+  hacked."
 - **Say plainly what this isn't.** No mass-market camera drone (DJI, Skydio,
   the thing most of the room pictures when they hear "drone") runs RTKLIB —
   different stack, and where they do RTK it's on-chip in the receiver
@@ -246,16 +254,20 @@ wrong lesson and someone will leave with it. Turn immediately:
 
 ## 6b. The cheapest way onto real hardware §CUT
 
-Added 2026-08-13, prompted by the obvious follow-up to §6. Originally framed
-around "buying a Reach M2 (~$750–1,023) is the only path that names a
-specific commercial product's shipped firmware" — that premise didn't survive
-the day: the actual Reach Plus firmware turned out to be a free download, and
-checking it (see §6 above) settled the "named product" question for that
-model without spending anything. What's below is still worth doing, but for
-a narrower reason now — it closes the *dynamic vs. static* gap (nobody has
-run this code and watched the corruption happen live on ARM, as opposed to
-reading the binary), not the *product vs. source* gap. Two findings from
-checking this, one negative:
+Added 2026-08-13, prompted by the obvious follow-up to §6, then overtaken by
+events twice in one day. Originally framed around "buying a Reach M2
+(~$750–1,023) is the only path that names a specific commercial product's
+shipped firmware" — that premise didn't survive the morning: the actual
+Reach Plus firmware turned out to be a free download. Then this section's
+own reason for existing — "closes the dynamic-vs-static gap, nobody's run
+this code and watched it happen on ARM" — didn't survive the afternoon
+either: `qemu-aarch64-static` (downloaded as a `.deb` and unpacked with
+`dpkg-deb -x`, no root, no install) ran the actual Reach Plus `rtkrcv`
+binary against the actual malicious stream, and its own console reported
+the base position moving by 1.473 m, live. See §6 and
+`research/README.md`, "Dynamic confirmation." What's below is now a record
+of the AgOpenGPS dead end and a narrower remaining case for Tier 0/1 — not
+"the only way to see this dynamically" any more.
 
 **Dead end, checked and ruled out: AgOpenGPS / any `str2str`-based tractor
 setup.** The obvious "cheap tractor monitor" candidate — real farmers, real
@@ -271,28 +283,31 @@ runs. Not a real-world instance of this bug.
 
 **What does exercise it for real: `rtkrcv` / RTKNAVI — RTKLIB's own
 positioning engines**, because fully parsing RTCM3 into `sta_t` is their
-actual job, not incidental. And there's already a head start: `apt install
-rtklib` on Debian/Raspbian **ARM is already confirmed unfortified** —
-`research/README.md`'s "the distro package is unfortified too" — but that
-result came from **static analysis of the downloaded `.deb`** (checking for
-absent `_chk` symbols), not from running it and watching the corruption
-happen on physical ARM silicon. Nobody's done the dynamic run yet.
+actual job, not incidental. Debian/Raspbian's `apt install rtklib` package
+is still only confirmed unfortified **statically** (`research/README.md`,
+"the distro package is unfortified too" — absent `_chk` symbols in the
+`.deb`, never run). Reach Plus's own `rtkrcv`, by contrast, has now been run
+— under emulation, not on physical silicon, see §6 — so the one thing left
+that neither the firmware download nor the qemu run touched is *Debian's
+package, or any ARM binary, actually executing on real physical hardware*.
+That's a narrower, lower-priority gap than it was this morning.
 
 | tier | hardware | cost | what it proves |
 |---|---|---|---|
 | 0 | `rtkrcv`/RTKNAVI on a laptop already owned + a cheap USB GPS dongle (VK-172, u-blox 7, ~$10) for genuine satellite lock | ~$10 | real unmodified RTKLIB, real sky, corruption on real (if non-embedded) hardware |
-| 1 | Raspberry Pi Zero 2 W (~$15) + microSD (~$8) + the same $10 dongle, running `apt install rtklib` | ~$35–50 | **first dynamic confirmation on real ARM**, not just symbol-table inspection — the embedded-Linux class this bug is framed around |
+| 1 | Raspberry Pi Zero 2 W (~$15) + microSD (~$8) + the same $10 dongle, running `apt install rtklib` | ~$35–50 | the one thing the qemu run didn't: corruption on **physical** ARM silicon, not emulated. Debian's generic package, not Reach's own binary — the qemu run already covered "Reach's own binary, dynamically" |
 | 1 + HITL | Tier 1 + the Pixhawk-class flight controller already on the hardware list below (~$200) | ~$235–250 | a real autopilot device physically consuming the corrupted position — no flight, no airframe needed |
-| 2 (existing) | Emlid Reach M2, ~$750–1,023 | ~$750–1,023 | the claim Tier 0/1 still *can't* make: that the **currently-sold** M2/RS2+ firmware carries the bug — the free Reach Plus download only settles this for that one, older product |
+| 2 (existing) | Emlid Reach M2, ~$750–1,023 | ~$750–1,023 | the claim nothing else here can make: that the **currently-sold** M2/RS2+ firmware carries the bug — Reach Plus (free download + qemu) only settles this for that one, older product |
 
 No real base station is needed at any tier — the malicious correction is
 synthetic (`gen_rtcm.py`, already built), exactly as it is in every other
-measurement in this project. Tier 1 is still worth doing: for the price of a
-Raspberry Pi, it closes the dynamic-vs-static ARM gap that reading the Reach
-Plus binary didn't (that was static analysis too — see §6). Tier 2's job has
-narrowed since this was written: it's no longer "get any named product at
-all," it's specifically "confirm the current M2/RS2+ line," since Reach
-Plus's free firmware already did the former for free.
+measurement in this project. Tier 1's remaining case is narrower than it was
+when this section was written: physical silicon vs. emulated, not dynamic
+vs. static — the qemu run (§6) already closed the latter for Reach Plus's
+own binary, for free. Tier 2's job has also narrowed: it's no longer "get
+any named product at all, dynamically confirmed," it's specifically
+"confirm the current M2/RS2+ line" — Reach Plus already covers the older
+one, both statically and dynamically, for free.
 
 ## 7. Live demo (8 min) — the payoff
 
@@ -432,12 +447,14 @@ stage, and it costs nothing.
 ## Hardware needed
 
 **Tier 0 — cheapest real-ARM confirmation (see §6b).** Not required for the
-stage demo; closes an open research gap (dynamic vs. static ARM proof) for
-the price of a Raspberry Pi.
+stage demo. **Narrower job as of 2026-08-13, later:** the dynamic-vs-static
+gap this was built to close got closed for free that same day, via
+`qemu-aarch64-static` against Reach Plus's own binary (§6). What's left is
+physical-silicon vs. emulated — real, but a smaller claim.
 
 | Item | Qty | ~Cost | Note |
 |---|---|---|---|
-| Raspberry Pi Zero 2 W | 1 | $15 | runs `apt install rtklib` — already confirmed unfortified on ARM by static analysis; this makes it dynamic |
+| Raspberry Pi Zero 2 W | 1 | $15 | runs `apt install rtklib` — confirmed unfortified statically, and (via qemu, on Reach's own binary, not this package) dynamically too; this tier's remaining job is physical silicon specifically |
 | microSD card | 1 | $8 | — |
 | USB GPS dongle (VK-172, u-blox 7) | 1 | $10 | real satellite lock, no RTK capability needed — the malicious correction is synthetic either way |
 
@@ -701,8 +718,8 @@ and we built an entire industry on a broadcast nobody signs."*
 | "Real drones use an F9P, not RTKLIB." | Correct, and worth conceding. The F9P does RTK on-chip. Reach is the counter-example, and ArduPilot documents it. |
 | "Isn't that a niche configuration?" | No. It's not the compiled default, but of the seven example configs RTKLIB ships, the only one set up for real-time RTK is the only one that enables it. Post-processing and single-point modes have no stream to take a base position from. |
 | "Wouldn't it show up in the logs?" | No. Max verbosity logs 31 characters of attacker-chosen text and never the length; the coordinate adoption isn't traced at all. |
-| "Did you test real hardware?" | Three-part answer as of 2026-08-13. Real radios: two Heltec V3s (the same SX1262 Reach uses) sent the actual attack over real LoRa RF into RTKLIB's own unmodified decoder. Real firmware: Reach Plus's (RS+/M+) actual shipped firmware, downloaded free from Emlid, confirmed unfortified by reading the binary. Not done: M2/RS2+ (the current models) firmware, and no device was ever powered on and attacked live — the firmware check was static, not dynamic. Say exactly which parts are real, which are simulated, and which are "real but only read, not run" — three different claims, don't blur them. |
-| "If you added the Pi + Pixhawk tier (§6b), doesn't that prove a real device is vulnerable?" | Refine, don't just say no — by 2026-08-13 a real device's firmware is already confirmed (Reach Plus, see above), so the Pi tier's value shifted. It proves the *dynamic* case: watching the corruption actually happen on running ARM silicon, not just reading a binary statically — nobody's done that yet, for Reach Plus or Debian's package either. It still doesn't touch M2/RS2+, and it still runs the open reference RTKLIB, not any vendor's exact build. As of this writing Tier 0/1 hasn't been built — don't claim the dynamic run happened until it has. |
+| "Did you test real hardware?" | Updated 2026-08-13, later, again. Real radios: two Heltec V3s sent the actual attack over real LoRa RF into RTKLIB's own unmodified decoder. Real firmware, statically: Reach Plus's shipped firmware, free download, unfortified. Real firmware, **dynamically**: the actual Reach Plus `rtkrcv` binary, run under `qemu-aarch64-static` against the real config and a real correction stream, its own console reporting the base position moving 1.473 m live. Still not done: M2/RS2+ (the current models), and physical ARM silicon rather than emulation. Four claims now, not three — real radios, real firmware read, real firmware run (emulated), and the two that are still open. Don't blur "run" and "run on physical hardware." |
+| "If you added the Pi + Pixhawk tier (§6b), doesn't that prove a real device is vulnerable?" | The dynamic case it was meant to prove is already proven — Reach Plus's own binary, run live via `qemu-aarch64-static`, see above — so this tier's remaining job shrank to one specific thing: physical ARM silicon instead of emulation. It still doesn't touch M2/RS2+. Emulation is a real gap from physical hardware, but a much smaller one than "never executed" — the instructions that ran were the actual shipped binary's, not a recompilation. Don't undersell it as "just a Pi would prove it for real" when what's missing is narrower than that now. |
 | "Did you transmit?" | For the stage demo: conducted only, into a shielded enclosure, never radiated. The bench validation that proved the LoRa mechanism works at all (§8) was low-power open-air at ~1 m, 2 dBm — say so if asked specifically about that, don't let "conducted only" cover testing it didn't apply to yet. |
 | "Is this a 0-day?" | No. Public since June 2026. What's new is where the spill lands and which builds fail silently. |
 | "Why can't the attacker pick any error size, not just four settings?" | Because the write zeroes whole bytes of an IEEE-754 double, low end first, and each extra byte is 8 more bits — a 256x jump in the smallest change that byte can represent. Decimal digits go up by 10x; these slots go up by 256x. That's why the usable settings are millimetres, metres, kilometres, planets and nothing in between. |

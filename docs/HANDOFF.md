@@ -2,6 +2,81 @@
 
 **Session date:** 2026-08-13
 
+## 2026-08-13, later: watched the actual shipped binary corrupt itself, live
+
+Follow-up to the entry below, same day. That session ended on "static, not
+dynamic" as the one gap the free firmware download didn't close — asked
+"what's the most impressive demo achievable right now," and the answer was
+closing exactly that gap, for close to zero cost.
+
+**No root anywhere in the chain.** `apt-get download qemu-user-static`
+fetches the `.deb` without installing it — `download` doesn't need root,
+only `install` does, which was blocked earlier this session. `dpkg-deb -x`
+unpacked it into a plain directory; `qemu-aarch64-static` runs from there by
+full path. Same no-root discipline as `check_image.sh`, extended to actually
+executing a binary.
+
+**Ran the real, unmodified `rtkrcv` from the firmware** —
+`usr/bin/RTKLIB/app/rtkrcv/gcc/rtkrcv`, found via `check_image.sh`'s
+end-to-end run earlier — under `qemu-aarch64-static -L <extracted-rootfs>`,
+from its own original working directory, with `-o ../rtk.conf`: the
+**actual shipped config**, unmodified. That config already has the
+correction input (`inpstr2`) set to `tcpcli localhost:9000`, `rtcm3` format,
+`ant2-postype=rtcm` — real production settings, not anything rigged for the
+test.
+
+**Built a ~40-line local TCP server** playing back `gen_rtcm.py`'s output —
+clean `1005` traffic for 6s, then the malicious `n1=211` `1033` interleaved
+with continued `1005` for 15s, same pattern every other harness here uses.
+`rtkrcv` connected out to it as a normal TCP client, exactly as it would to
+a real base station.
+
+**Read the result off `rtkrcv`'s own telnet console** (`status` command,
+its own configured password) — not a debugger, not memory inspection:
+
+```
+pos xyz (m) base : -2694684.000,-4293642.366,3857878.924
+```
+
+against the true `-2694685.4730,-4293642.3660,3857878.9240` — **1.473 m on
+X, Y/Z untouched**, the predicted `n1=211` behavior, on the real binary,
+live. Message counters (`1005(21),1033(15)`) match exactly what was sent.
+The console's `error` command: nothing. The 1.3 MB trace file (`-t 5`) shows
+the already-characterized diagnostic line and nothing about the position
+change — confirmed dynamically what had only been argued from source.
+Clean `shutdown` via the console; no crash.
+
+**What's left, precisely:** still Reach Plus, not M2/RS2+; still this one
+2019 build; and it's CPU emulation, not physical Reach silicon — a real but
+much smaller gap than "static analysis," since the actual compiled
+instructions from the actual shipped binary executed. Full writeup:
+`research/README.md`, "Dynamic confirmation: the shipped binary, running,
+live."
+
+**Docs updated to carry this**, all in this entry's commit: `research/README.md`
+(new section, the "static, not dynamic" caveat marked resolved, reproduction
+commands), `docs/talk-outline.md` (§6b's "nobody's done the dynamic run yet"
+no longer true, Tier 0's whole premise, the two FAQ entries), `docs/eli5.md`,
+`docs/blog-1033-draft.md`, `README.md`, `docs/rtk-rtklib-research-notes.md`.
+
+**Artifacts, not committed:** `~/rtk-fw/qemu-local` holds the extracted
+`qemu-user-static`, `gen_rtcm.py` output, the TCP server script, and the
+1.3 MB trace file. Not in the repo.
+
+**Next steps:**
+
+1. Same treatment for `str2str`/`convbin` — laid out the same way, not
+   individually run.
+2. M2/RS2+ firmware is still the standing gap this doesn't touch — see the
+   entry below.
+3. Worth considering whether this dynamic-proof technique is reusable
+   enough to script (`check_binary.sh` handles static checks; nothing yet
+   automates "spin it up under qemu and read the console back").
+
+---
+
+**Previous session:** 2026-08-13, earlier
+
 ## 2026-08-13: Reach Plus's actual shipped firmware obtained free, confirmed unfortified — biggest open caveat in the project resolved for one product
 
 Session started as hardware-buying questions (Tier 1 conducted-RF list,
