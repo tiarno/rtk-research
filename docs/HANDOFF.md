@@ -72,15 +72,19 @@ and "What is not proven"), `docs/blog-1033-draft.md` (a resolved publication
 blocker, Part 14, Part 15), `docs/rtk-rtklib-research-notes.md` (item C
 marked done for one instance).
 
-**Not finished this session:** running `check_image.sh` itself end-to-end
-against the image, for full-pipeline corroboration rather than the targeted
-manual steps above. Started, but its `dd` uses `bs=512` and crossing the
-WSL↔Windows filesystem boundary at that block size is extremely slow (the
-same trap hit and fixed manually with `bs=1M` earlier in the session) —
-still running in the background when this session ended, not blocking on
-it since `check_binary.sh` against the manually-extracted library already
-gives the citable, canonical result. Worth either waiting for it to finish
-or fixing its block size if this comes up again.
+**Update — `check_image.sh` finished, after this session's commit, and it
+found more than the manual steps did.** Its `dd` uses `bs=512`, and crossing
+the WSL↔Windows filesystem boundary at that block size is extremely slow
+(the same trap hit and fixed manually with `bs=1M` earlier); it took long
+enough to run past the point where the rest of this session's docs were
+already committed. Worth fixing its block size before relying on it again.
+What it turned up: `/usr/bin/RTKLIB/app/rtkrcv/gcc/rtkrcv` — a real
+executable, laid out exactly like an unmodified RTKLIB build tree, with
+`readelf -d` showing `NEEDED librtk.so`. That's the piece the manual steps
+didn't establish: not just "the vulnerable code sits in a library on the
+device," but "the actual real-time daemon this firmware ships depends on
+that library by name." Folded into `research/README.md`'s new section in a
+follow-up commit.
 
 **Artifacts, not committed:** `~/rtk-fw` (WSL, visible at
 `/mnt/c/Users/tim/rtk-fw` from Windows) holds the downloaded zip, the raw
@@ -93,12 +97,14 @@ cleaned up yet.
 1. Same firmware-hunting approach against Reach M2 / RS2+ — the models the
    Tier 2 hardware line is actually about now. Different filename pattern;
    worth another documentation-search pass rather than more guessing.
-2. Let `check_image.sh` finish (or rerun with a larger `dd` block size) for
-   the full-pipeline corroboration, and consider whether the manual
-   Capstone-based inlining trace is worth turning into a reusable script —
-   `check_binary.sh` doesn't currently handle the "trace string present but
-   no named symbol" case, and this won't be the last binary where that's
-   true.
+2. **Done** — `check_image.sh` finished (see the update above) and also
+   `str2str`/`convbin` sit in the same `RTKLIB/app/*/gcc/` layout as
+   `rtkrcv` but weren't individually pulled and checked; cheap to do if
+   worth it. Fix its `bs=512` before running it against another image.
+   Separately, still worth doing: turn the manual Capstone-based inlining
+   trace into a reusable script — `check_binary.sh` doesn't currently
+   handle the "trace string present but no named symbol" case, and this
+   won't be the last binary where that's true.
 3. Try dynamic confirmation — `qemu-user` running this exact `librtk.so`
    against a crafted 1033 stream, or the Pi tier from §6b — to close the
    static-vs-dynamic gap explicitly called out above.

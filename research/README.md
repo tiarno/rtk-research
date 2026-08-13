@@ -463,6 +463,29 @@ now including one obtained the way an actual customer would obtain it.
   etc. have names) but no type/struct debug info, so `offsetof(sta_t,pos)`
   could not be pulled directly from this binary via DWARF.
 
+**Confirmed running `check_image.sh` itself, and it found more.** The manual
+steps above locate `librtk.so` by grepping file contents; the script's own
+end-to-end run (slow — see `docs/HANDOFF.md` on its `dd` block size — but it
+finished) also turned up `/usr/bin/RTKLIB/app/rtkrcv/gcc/rtkrcv`: a real
+90 KB executable, laid out exactly like an unmodified checkout of RTKLIB's
+own `app/rtkrcv/gcc` build directory. `readelf -d` on it:
+
+```
+NEEDED   libm.so.6
+NEEDED   libpthread.so.0
+NEEDED   librtk.so
+NEEDED   libc.so.6
+```
+
+`check_binary.sh` against `rtkrcv` itself reports "1033 decoder present: no"
+and is right to — the decoder isn't in this file, it's in `librtk.so`, which
+this binary explicitly requires at load time. This is the missing link: not
+"the vulnerable code sits in a library somewhere on the device," but "the
+actual real-time positioning daemon this firmware ships depends on it by
+name." `str2str` and `convbin` are laid out the same way
+(`/usr/bin/RTKLIB/app/{str2str,convbin}/gcc/`) and weren't individually
+pulled and checked, but the pattern is the same build.
+
 Reproduce:
 
 ```sh
@@ -471,6 +494,8 @@ unzip reach-plus-v2.18.1.zip                      # -> reach-plus-v2.18.1.img, ~
 ./check_image.sh reach-plus-v2.18.1.img            # carves the rootfs, greps for RTKLIB
 debugfs -R "dump /usr/lib/librtk.so ./librtk.so" rootfs.img
 ./check_binary.sh ./librtk.so                      # 1033 decoder present? fortified?
+debugfs -R "dump /usr/bin/RTKLIB/app/rtkrcv/gcc/rtkrcv ./rtkrcv" rootfs.img
+readelf -d ./rtkrcv | grep NEEDED                  # confirms rtkrcv actually loads librtk.so
 ```
 
 The extracted image and filesystem (~2.5 GB) are not checked in; this section
