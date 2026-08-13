@@ -231,6 +231,11 @@ wrong lesson and someone will leave with it. Turn immediately:
   correction stream. Its own console: base position moved 1.473 m, live,
   message counters matching exactly what was sent, nothing in the error log.
   Full account: `research/README.md`, "Dynamic confirmation."
+- **Scripted and rehearsed as of the same day, `research/reach_qemu_demo.sh`
+  — one command, ~30 s, same clean before/after readout on every run
+  checked so far.** This is a live-demo candidate, not just a slide: the
+  decision (2026-08-13) is to run it live in §6 rather than cite it. See
+  "Staging this live" below §8.
 - **Be precise about what's still a limit.** That's Reach Plus, an older
   model, firmware from 2019, run under emulation rather than physical
   silicon. **Reach M2 and RS2+ — the models currently for sale — are not yet
@@ -573,6 +578,54 @@ to be able to say.
 **Minimum viable spend to add live RF: ~$155** (Tier 1 minus the boards you
 already own). **To also say "real hardware, real satellites": +~$650.**
 
+## Staging the Reach Plus demo live (§6)
+
+Decision 2026-08-13: run it live, alongside §7 (SITL flight) and §8 (RF),
+not as a slide. That makes three independent live elements in one talk —
+this section is what "rehearsed, not improvised" needs to mean for the
+newest one, same discipline §7 already applies to itself.
+
+**What's already true, as of today:** `research/reach_qemu_demo.sh` is one
+command, takes about 30 seconds, and has produced the identical clean
+before/after readout on every run tested so far (three, all consistent).
+That's a good start, not a rehearsed demo — three runs on one machine,
+by the person who wrote it, is not the same bar §7 cleared before it was
+called stage-ready.
+
+**What "rehearsed" needs to mean before this goes live in front of anyone:**
+
+- **A recorded fallback, same principle as `demo_view.py --replay`.** If the
+  live run hangs or errors on stage, the recording needs to be
+  indistinguishable from a live terminal — a captured session (`script(1)`
+  or similar), not a video, so it can be played back in the same terminal
+  window the live attempt was going to use.
+- **Rehearse the failed starts, not just the happy path** — the same
+  standing instruction from the 2026-08-09 session that's never been
+  optional for §7. What are this demo's specific failure shapes? At least:
+  a leftover `qemu`/`rtcm_stream_server.py` process from a previous run
+  still holding port 9000 or 9001 (hit repeatedly while building this —
+  `pkill -f qemu-aarch64-static` and `pkill -f rtcm_stream_server.py`
+  before every run is currently a manual step, not automated); the
+  extracted firmware or `qemu-aarch64-static` binary not being present on
+  the actual demo machine (multi-GB, deliberately not checked into the
+  repo — needs a "copy this onto the laptop before travelling" checklist
+  item, same shape as the `view.jsonl` reminder §7 already has); and qemu
+  startup being slow enough on an unfamiliar machine to blow past
+  whatever timeout the script assumes.
+- **Run it on the actual demo laptop, not just the machine it was built
+  on.** Nothing about qemu-user emulation should be machine-specific, but
+  "should be" is exactly the phrase that precedes stage failures — this
+  hasn't been tried anywhere but one WSL install yet.
+- **Time it precisely once rehearsed**, the way §7 has an exact 260 s
+  figure — right now "about 30 seconds" is an estimate from a few runs,
+  not a number to put on a slide's timing budget.
+
+**Not yet resolved:** whether this demo needs its own visual (a terminal
+window is legible on stage, but a bigger screen showing "1005... 1005...
+1033 — BASE POSITION: -2694684.000" might land harder than raw console
+scrollback — worth testing against §7's screen design rather than assuming
+raw text is enough).
+
 ---
 
 ## 9. The vertical negative, and the defence (3 min)
@@ -703,6 +756,18 @@ and we built an entire industry on a broadcast nobody signs."*
       built-in radio; RS2+ with built-in LoRa ~$2,699) — parked for now,
       not a pre-submission blocker. §8's over-the-air proof already
       validates the mechanism against real RTKLIB without needing it.
+- [x] Reach Plus firmware obtained (free download) and confirmed
+      unfortified, both statically and dynamically — see §6 and
+      `research/README.md`. **Still open, and now the binding constraint
+      for this element specifically** (see "Staging the Reach Plus demo
+      live" above §9): a recorded fallback session, rehearsed failed
+      starts (stale port-holding processes hit repeatedly while building
+      this), a run on the actual demo laptop rather than just the machine
+      it was built on, and an exact timing figure to replace "about 30s"
+      — none of the four done yet
+- [ ] Decide the Reach Plus demo's on-screen presentation — raw terminal
+      vs. something closer to §7's screen design — before rehearsal, not
+      after; changing it later means re-rehearsing
 
 ## Known questions from the audience, with answers ready
 

