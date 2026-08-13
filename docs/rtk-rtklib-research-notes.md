@@ -115,6 +115,17 @@ Untested by anyone in the published research, because it's not a GNSS bug at all
 ### C. Supply-chain mapping
 Nobody has published which real consumer/commercial products embed a vulnerable RTKLIB fork. FuzzingLabs explicitly notes the flaws ride quietly into closed firmware that never says the word RTKLIB. This is a fingerprinting exercise — binary-diffing known RTKLIB decode-function signatures against firmware images of real drones/survey/ag equipment — not new bug-hunting, but it's what turns "theoretical vulnerability" into "here's the actual blast radius."
 
+**Update 2026-08-13: done, for one product.** A freely-downloaded Reach Plus
+(RS+/M+) firmware image, opened the same rootless way `research/check_image.sh`
+automates (`dd` + `debugfs`, no root), turned up `librtk.so` — RTKLIB 2.4.3,
+Emlid's build. `research/check_binary.sh`, run directly against the
+extracted library, confirms the 1033 decoder present and zero fortified
+symbols. See `research/README.md`, "The shipped firmware, not just the
+source," for the full trail, including why no fortification was found. Reach
+M2/RS2+ (the current product line) and every non-Emlid vendor are still
+unfingerprinted — this closes one instance of the exercise, not the exercise
+itself.
+
 ---
 
 ## 7. Open items / next steps

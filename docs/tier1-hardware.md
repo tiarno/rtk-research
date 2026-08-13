@@ -44,12 +44,15 @@ conference table, contained."
 
 ## What is not resolved yet
 
-- **Confirm the splitter's actual passband before ordering** — pull the
-  [ZFSC-2-2500-S+ datasheet](https://www.minicircuits.com/pdfs/ZFSC-2-2500+.pdf)
-  and check insertion loss / isolation specifically at 863–928 MHz, not just
-  the headline 10–2500 MHz range.
-- **Termination pack size** — the linked Amazon listing's per-unit quantity
-  wasn't checked; buy enough to get to 3.
+- ~~Confirm the splitter's actual passband before ordering~~ — **resolved
+  2026-08-13.** [ZFSC-2-2500-S+ datasheet](https://www.minicircuits.com/pdfs/ZFSC-2-2500+.pdf)
+  measured points bracket 863–928 MHz (700 MHz and 1000 MHz rows): total loss
+  ~3.58–3.59 dB (insertion loss ~0.58–0.59 dB after the 3 dB splitter loss),
+  isolation ~19.3–20.0 dB — well inside the mid-range spec (14 dB min
+  isolation, 1.4 dB max insertion loss). No swap needed.
+- **Termination pack size** — still open. The Amazon listing blocks automated
+  fetches (returns HTTP 500 to WebFetch); per-unit quantity needs a manual
+  check at checkout. Buy enough to get to 3.
 - **Not yet bench-tested.** Ordering this list is necessary but not
   sufficient — [talk-outline.md](talk-outline.md#pre-submission-checklist)
   still has "Tier 1 conducted-path hardware ordered **and bench-tested**" as

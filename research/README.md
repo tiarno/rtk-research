@@ -25,7 +25,7 @@ this turns out to be the most important fact here:
 | build | outcome |
 |---|---|
 | glibc `_FORTIFY_SOURCE` active (`-O1`+ and the flag actually reaching the compiler) | the fortified `strncpy` detects the overflow and **aborts the process** — a remote DoS, repeatable for as long as the stream continues. On a vehicle this is a **second attack, not a mitigation**: the aircraft loses GPS, cannot return home, and lands within ~10 m of wherever the attacker chose to send the packet |
-| unfortified — **every build measured so far**: both Windows distributions, and Debian's own `rtklib` package on ARM | the write goes through **silently** — position corruption |
+| unfortified — **every build measured so far**: both Windows distributions, Debian's own `rtklib` package on ARM, and Emlid's own shipped Reach Plus (RS+/M+) firmware | the write goes through **silently** — position corruption |
 
 In the unfortified case the interesting band is a small one. A shift of
 ~0.4-2.5 m leaves RTKLIB reporting **Q=1 (RTK fixed)** — its highest quality
@@ -395,6 +395,87 @@ else if (ret==5) { /* antenna position parameters */
   `norm(sta[i].pos,3)>0.0`. The same asymmetry as upstream: the real-time path
   is the unguarded one.
 
+### The shipped firmware, not just the source
+
+Everything in the previous section is a claim about published source code.
+This one is about an actual firmware image, obtained the way any customer
+would: `files.emlid.com` serves several Reach firmware `.zip` files with no
+purchase, login, or authentication — `reach-plus-v2.18.1.zip`, 363 MB, for
+Reach Plus (RS+/M+), confirmed reachable 2026-08-13. This resolves the "not
+casually obtainable" note below for one specific product; it does not
+resolve it for the currently-sold M2/RS2+ line, which use different firmware
+filenames that weren't found.
+
+The image is a 2 GB Raspberry-Pi-style SD card image (`dos` partition table,
+FAT32 boot + two 986 MB Linux root partitions + a 64 MB data partition — an
+A/B layout). No root was used or needed: `fdisk -l` reads the partition
+table straight from the file, `dd` carves the root partition out by sector
+offset, and `debugfs -R rdump` reads the ext4 filesystem without mounting it
+— the same no-root approach `check_image.sh` already automates (see below).
+
+`usr/lib/librtk.so` is RTKLIB 2.4.3, Emlid's own build, ARM aarch64, not
+stripped:
+
+| check | result |
+|---|---|
+| version string | `RTKLIB ver.2.4.3 Emlid` |
+| 1033 trace strings present (`rtcm3 1033 length error`, `rtcm3 1033: ant=…`) | yes |
+| `decode_type1033` as a named symbol | **no** — see below |
+| `__strncpy_chk` / any `*_chk` import | **none, anywhere in the library** |
+| `strncpy`/`strcpy`/`sprintf`/`memcpy` imports | present, plain |
+
+**No standalone `decode_type1033` symbol looks like an absence and isn't
+one.** Other `decode_typeNNNN` functions (1019, 1044-1047) kept their own
+local symbols; this one didn't, most likely inlined into the dispatcher by
+the optimizer since it has exactly one call site. Confirmed rather than
+assumed: both trace strings' addresses were computed from `.rodata`, and
+disassembling `decode_rtcm3` (Capstone, `CS_ARCH_ARM64`, since this host's
+`objdump` has no AArch64 backend) finds both addresses built by `adrp`/`add`
+pairs *inside* `decode_rtcm3` itself, at `+0x2074` and `+0x33bc`. The logic
+is live and reachable from an exported function, not dead code the linker
+happened to leave a string behind for.
+
+That makes the fortification check dispositive rather than moot: zero `*_chk`
+symbols in the whole dynamic symbol table, on the exact function that matters.
+Same silent-corruption result as every other build measured in this project,
+now including one obtained the way an actual customer would obtain it.
+
+**Scope, precisely — this is one product, one old build:**
+
+- **Reach Plus (RS+/M+), not M2/RS2+.** The currently-sold line has different
+  firmware filenames; none were found by either search or a handful of
+  targeted guesses off the naming pattern that worked. Guessing further
+  starts to look like scanning a vendor's bucket rather than following a
+  lead, so that stopped rather than continued. Unresolved, not ruled out.
+- **v2.18.1, dated 2019-06-27.** Whether a current Reach Plus firmware build
+  differs is unchecked.
+- **Static, not dynamic.** The vulnerable code's presence and lack of
+  fortification are confirmed by reading the binary, not by feeding it a
+  malicious stream and watching `sta.pos` move. Nothing here was executed —
+  aarch64 on an x86_64 host would need `qemu-user` or real ARM hardware, and
+  the crt-only debug info in this particular build (see below) means struct
+  offsets weren't independently re-derived from it either; that inference
+  still rests on the six-ABI table above, which does include arm64.
+- **The library is "not stripped," which overstates what that buys.** `file`
+  reports `with debug_info` — true, but the only DWARF present is for the
+  linked-in `crti.S`/`crtn.S` C-runtime stubs, not RTKLIB's own source. The
+  application code has its ordinary ELF symbol table (why `decode_type1019`
+  etc. have names) but no type/struct debug info, so `offsetof(sta_t,pos)`
+  could not be pulled directly from this binary via DWARF.
+
+Reproduce:
+
+```sh
+curl -O https://files.emlid.com/images/reach-plus-v2.18.1.zip
+unzip reach-plus-v2.18.1.zip                      # -> reach-plus-v2.18.1.img, ~2 GB
+./check_image.sh reach-plus-v2.18.1.img            # carves the rootfs, greps for RTKLIB
+debugfs -R "dump /usr/lib/librtk.so ./librtk.so" rootfs.img
+./check_binary.sh ./librtk.so                      # 1033 decoder present? fortified?
+```
+
+The extracted image and filesystem (~2.5 GB) are not checked in; this section
+and the commands above are the reproduction record.
+
 ### The distro package is unfortified too, and it is ARM
 
 Chasing the Reach binary turned up something better on the way. Emlid's Navio
@@ -484,15 +565,18 @@ separate correction link to the drone." That is the chain this harness
 simulates, with a real product in the receiver position and an unauthenticated
 radio link carrying the corrections into it.
 
-**What is not established: which column the shipped binary falls into.** The
-source is vulnerable; whether Emlid's build has `_FORTIFY_SOURCE` active
-decides between a silent 2 m corruption and one packet killing the receiver.
-Both are results and neither is measured. The image is not casually obtainable
-— `files.emlid.com` returns 403 for image paths and directory listings, the
-Reach Firmware Flash Tool fetches the image at runtime rather than publishing a
-URL, and the Wayback Machine holds only Emlid's *Navio* Raspbian images, which
-are a different product and not confirmed to ship RTKLIB binaries at all.
-Settling it needs either the flash tool's fetch observed or the hardware.
+**Update 2026-08-13 — established, for one product.** This section originally
+said the image was not casually obtainable: `files.emlid.com` 403s directory
+listings and the paths that were tried, the Flash Tool fetches at runtime
+rather than publishing a URL, and Wayback only had the unrelated Navio image.
+All true, and all beside the point — the actual product firmware files turn
+out to be at guessable, unauthenticated, exact URLs that just weren't the
+ones tried. `reach-plus-v2.18.1.zip` is a live download at
+`files.emlid.com/images/`, found via a documentation cross-reference rather
+than the Flash Tool. See "The shipped firmware, not just the source," below,
+for the result: unfortified, same as everything else. **Still not settled:
+M2 and RS2+**, the currently-sold models — their firmware filenames weren't
+found, and this result doesn't transfer to them without checking.
 
 ### Effect on the solution
 
@@ -1269,7 +1353,7 @@ RTKLIB=./RTKLIB ./run.sh
 RTKLIB=./RTKLIB ASAN=1 ./run.sh
 ```
 
-**Reproducing the provenance claims.** The three "is it really in X" findings
+**Reproducing the provenance claims.** The four "is it really in X" findings
 are re-runnable rather than asserted:
 
 ```sh
@@ -1279,7 +1363,12 @@ are re-runnable rather than asserted:
 curl -O http://deb.debian.org/debian/pool/main/r/rtklib/rtklib_2.4.3.b34+dfsg-1+b2_armhf.deb
 ./check_binary.sh rtklib_2.4.3.b34+dfsg-1+b2_armhf.deb   # fortified or not?
 
-./check_image.sh some-firmware.img          # rootless: is RTKLIB in there?
+curl -O https://files.emlid.com/images/reach-plus-v2.18.1.zip
+unzip reach-plus-v2.18.1.zip
+./check_image.sh reach-plus-v2.18.1.img     # rootless: is RTKLIB in there?
+debugfs -R "dump /usr/lib/librtk.so ./librtk.so" rootfs.img
+./check_binary.sh ./librtk.so               # the actual shipped Reach Plus firmware
+
 ./pick_base.py --explain -3978243.8000      # what each rung does to the demo base
 ```
 
@@ -1470,14 +1559,18 @@ Read these before quoting anything above.
 - The fortified/unfortified split was measured on glibc + gcc 7.5 on x86-64.
   The shipped Windows binaries were then run directly and corrupt the
   coordinate silently — see "The same dial on the binaries people actually
-  run". Emlid Reach's **source** is now confirmed to carry the defect and the
+  run". Emlid Reach's **source** is confirmed to carry the defect and the
   unvalidated adoption, with a layout that takes the same payload lengths (see
-  "A shipping receiver runs this code"), but **no receiver firmware binary has
-  been examined**. The earlier expectation that Linux targets land in the
-  *fortified* column is now **refuted for distro builds** — Debian's own
-  armhf package imports no `*_chk` at all (see "The distro package is
-  unfortified too") — which removes the basis for predicting that Reach
-  aborts. Reach's own firmware is still unmeasured either way. Until a binary
-  is checked, say "the source is affected", not "the product behaves this way".
+  "A shipping receiver runs this code"). **One receiver firmware binary has
+  now been examined** — Reach Plus (RS+/M+) v2.18.1, 2019 — and it is
+  unfortified: see "The shipped firmware, not just the source." The earlier
+  expectation that Linux targets land in the *fortified* column is refuted
+  across the board now: Debian's armhf package, and this shipped ARM
+  firmware, both import no `*_chk` at all. **Still unmeasured: M2 and RS2+**,
+  the models currently sold, and whether current Reach Plus firmware differs
+  from this 2019 build. For those specifically, keep saying "the source is
+  affected," not "the product behaves this way" — that sentence has now
+  graduated to "confirmed" for exactly one product and firmware version, not
+  for the Reach line as a whole.
 - `dgps` being zeroed is guarded at `rtcm2.c:71` (`if (rtcm->dgps)`), so it
   silently disables DGPS correction output rather than faulting.

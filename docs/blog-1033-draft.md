@@ -32,9 +32,14 @@ MUST FIX BEFORE PUBLISHING - do not skip these, they are not polish:
 
 3. THE UNNAMED FORK. Part 14 says "at least one commercial GPS manufacturer's
    public fork". It is emlid/RTKLIB, branch `reach`, a public repository -
-   naming it is a statement of fact. The thing to protect is the PRODUCT claim
-   (no firmware binary has been examined), not the repository name. Decide, and
-   either name it or cut the paragraph; as written it reads as insinuation.
+   naming it is a statement of fact. RESOLVED 2026-08-13 for one product: a
+   freely-downloaded Reach Plus (RS+/M+) firmware image was checked directly
+   and confirmed to carry the same unfortified decoder. Reach M2/RS2+, the
+   currently-sold line, are still unchecked - the PRODUCT claim now needs to
+   distinguish "Reach Plus's actual firmware: confirmed" from "the rest of
+   the Reach line: source only" rather than treating Reach as one undivided
+   claim. See research/README.md, "The shipped firmware, not just the
+   source."
 
 IF THE TALK HAPPENS FIRST: drop the "I am not publishing the lookup table" note
 in Part 6 - holding back from readers what a room was shown reads badly - and
@@ -789,20 +794,42 @@ public, with the flaw untouched.
 So "wait for the patch" is not advice that means anything here. There is nobody
 to wait for. I would rather say that plainly than imply a fix is on its way.
 
-The same code is also present, unchanged, in at least one commercial GPS
-manufacturer's public fork of RTKLIB — same flaw, same internal layout, same
-missing check on the live path. That is an observation about published source
-code. I have not examined any actual device's firmware, and until I do, the
-honest statement is that *the source is affected*, not that any product behaves
+The same code is also present, unchanged, in Emlid's public fork of RTKLIB —
+same flaw, same internal layout, same missing check on the live path. For a
+long time that was an observation about published source code only, and the
+honest statement was "the source is affected," not that any product behaves
 any particular way.
+
+That changed for one Emlid product. Their firmware images are served
+publicly with no purchase or login required. I downloaded one — Reach Plus
+(RS+/M+), version 2.18.1, dated 2019 — opened the disk image without root
+(partition carved with `dd`, read with `debugfs`), and found `librtk.so`:
+RTKLIB 2.4.3, Emlid's own build, compiled for the receiver's ARM processor.
+The decoder is in there — inlined into the message dispatcher rather than
+kept as its own named function, confirmed by tracing both of its diagnostic
+strings back to live code inside it — and the library imports not one
+fortified libc symbol. Same silent-corruption result as everything else
+measured in this piece, now confirmed against an actual shipped product's
+actual firmware, not just its published source.
+
+Reach M2 and RS2+ — the models currently for sale — are not yet checked.
+Neither is whether Emlid's current firmware differs from this 2019 build.
+"The source is affected" now has one specific, dated exception where it's
+stronger than that; it hasn't become "the product line behaves this way"
+across the board.
 
 ## Part 15: What I did not do
 
 Worth being blunt about, because a lot of security writing is vaguer here than it
 should be.
 
-- **No real hardware was involved anywhere in this work.** No aircraft, no GPS
-  receiver, no radio transmitted. All of it is simulation and recorded data.
+- **No aircraft, real or simulated-into-the-real-world, was ever attacked
+  live.** Two things have since happened that this draft doesn't narrate yet:
+  two small real radios sent the real malicious message over the air into
+  RTKLIB's own unmodified decoder (see `research/README.md`, "Over a serial
+  link" / the radio delivery work), and one real receiver's firmware was
+  downloaded and read (Part 14, above). Neither is a live attack on a
+  powered-on device with a propeller attached.
 - **One base station, one rover, one data set**, and an old one. Whether the same
   invisibility holds across other satellite constellations and modern
   multi-frequency receivers is untested.

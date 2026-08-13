@@ -300,14 +300,22 @@ link the drone already uses for telemetry. That is the exact chain in this
 writeup, with a real product where our simulation has a stand-in, and an
 unauthenticated radio link feeding it.
 
-**What we have not done is test the device itself.** We read the source, not
-the receiver. We could not get the firmware without buying one, and the two
-possibilities lead to different headlines: either it corrupts the position
-silently like everything else measured, or it crashes and one message knocks a
-survey receiver off the air. As above, those are two different attacks rather
-than a bad case and a safe one — the crash is the detectable one, and also the
-one that brings an aircraft down on cue. We do not know which it is, and we are
-not going to guess.
+**Update: we did get the firmware, and for free.** Emlid publishes firmware
+images for one of their receivers — an older model called Reach Plus — as a
+plain download, no purchase or account needed. We downloaded it, opened it up
+(the file is just a copy of the receiver's entire storage), and searched it
+for the exact same program. It is in there: the same broken code, compiled
+in and reachable, and none of the protection that would turn it into a loud
+crash instead of a silent error. So for this specific model, the answer to
+"which of the two does it do" is settled: it corrupts silently, like
+everything else we tested.
+
+That is still not the full answer. Emlid sells other, newer receivers in the
+same product line — the ones the earlier version of this write-up had in
+mind — and we have not checked those; only the older model. And what we did
+is read the compiled program carefully, not power one up and attack it live.
+Both are worth being precise about rather than rounding up to "the receiver
+is hacked."
 
 ## What is new here
 
@@ -342,7 +350,10 @@ here:
 
 ## What is not proven
 
-No real GNSS receiver product and no real aircraft were involved.
+No real aircraft were involved, and no receiver was ever powered up and
+attacked live. One real receiver's actual firmware was opened up and read,
+which is not nothing, but it is not the same claim — see "Is this in
+anything you can buy?" above for exactly what that does and doesn't settle.
 
 **The radio hop is no longer theoretical.** Two small radios built around
 the same chip Emlid Reach uses (SX1262) sent the real malicious message over

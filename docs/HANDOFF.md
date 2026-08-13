@@ -1,6 +1,113 @@
 # Handoff Notes
 
-**Session date:** 2026-08-09
+**Session date:** 2026-08-13
+
+## 2026-08-13: Reach Plus's actual shipped firmware obtained free, confirmed unfortified — biggest open caveat in the project resolved for one product
+
+Session started as hardware-buying questions (Tier 1 conducted-RF list,
+whether an off-the-shelf drone is affected, cheapest path onto real
+hardware, used Reach M2 pricing) and ended somewhere nobody expected: asking
+"could we do the supply-chain fingerprinting exercise from
+`rtk-rtklib-research-notes.md` (item C)" turned up a real, unauthenticated,
+free firmware download, and running it down settled the single biggest
+standing caveat in the whole project — "I read the source, I did not test
+the device" — for one specific Emlid product.
+
+**What happened, in order:**
+
+1. `files.emlid.com` returns 403 for directory listings and for every path
+   guessed directly (matching the existing note in `research/README.md`).
+   Search engines know exact filenames that direct guessing didn't turn up:
+   `reach-plus-v2.18.1.zip`, 363 MB, downloaded clean, no auth. (`reach-m2-*`
+   and `reach-rs2-*` variants were tried, guessing off the same naming
+   pattern; all 403'd. Stopped there rather than keep guessing — enough
+   guesses starts to look like scanning a vendor's bucket rather than
+   following a lead.)
+2. The zip contains a 2.19 GB Raspberry-Pi-style SD card image. No root
+   needed: `fdisk -l` reads the DOS partition table straight from the file;
+   `dd` carves the largest Linux partition by sector offset; `debugfs -R
+   rdump` reads the ext4 filesystem without mounting. (This is exactly what
+   `research/check_image.sh` already automates — see below for running it
+   properly, after the fact.)
+3. `usr/lib/librtk.so`: RTKLIB 2.4.3, Emlid's own build, ARM aarch64, not
+   stripped. Grepping the extracted tree for the 1033 decoder's trace
+   strings found it directly.
+4. **No standalone `decode_type1033` symbol — initially looked like the
+   message type just wasn't supported in this build.** It isn't absent: used
+   Capstone (`pip install --user`, no root) to disassemble, since this
+   x86_64 host's `objdump` has no AArch64 backend, and traced both trace
+   strings' `.rodata` addresses back to `adrp`/`add` pairs *inside*
+   `decode_rtcm3` itself. The compiler inlined it — one call site, small
+   function, ordinary optimization — and the ELF symbol table only kept
+   names for the `decode_typeNNNN` functions that stayed separate. The logic
+   is live and reachable from an exported function.
+5. `research/check_binary.sh`, run directly against the extracted
+   `librtk.so`, confirms it cleanly in the project's own established format:
+   `1033 decoder present : yes` / `__strncpy_chk : absent` / `any *_chk
+   import : none at all` / `UNFORTIFIED: the coordinate is corrupted
+   silently`. Same evidentiary bar already used for the Debian ARM package
+   claim, now applied to an actual shipped product.
+6. Tried pulling `offsetof(sta_t,pos)` straight from the binary's DWARF info,
+   since `file` reports `with debug_info, not stripped`. Dead end: the only
+   DWARF present is for the linked-in `crti.S`/`crtn.S` C-runtime stubs, not
+   RTKLIB's own code. The struct-offset claim still rests on the six-ABI
+   `check_offsets.py` table (which does cover arm64), not on this binary
+   directly.
+
+**Scope, stated precisely because it's easy to overstate:** this is Reach
+Plus (RS+/M+), not Reach M2 or RS2+ — the currently-sold models, whose
+firmware filenames weren't found. It's firmware from 2019 (v2.18.1); whether
+a current build differs is unchecked. And it's static analysis — the binary
+was read, not run; nobody has watched the corruption happen live on this
+exact binary. All three of these are now stated explicitly everywhere the
+old "I have not examined any device's firmware" caveat used to stand alone.
+
+**Docs updated to carry this** (all in this session, this is the commit):
+`README.md`, `research/README.md` (new section "The shipped firmware, not
+just the source," the measured-builds table, the "not casually obtainable"
+paragraph, the Limitations bullet, the reproduction command block),
+`docs/talk-outline.md` (§6, §6b's premise, the Tier 2 hardware table and the
+used-hardware note, two FAQ entries), `docs/eli5.md` (the product section
+and "What is not proven"), `docs/blog-1033-draft.md` (a resolved publication
+blocker, Part 14, Part 15), `docs/rtk-rtklib-research-notes.md` (item C
+marked done for one instance).
+
+**Not finished this session:** running `check_image.sh` itself end-to-end
+against the image, for full-pipeline corroboration rather than the targeted
+manual steps above. Started, but its `dd` uses `bs=512` and crossing the
+WSL↔Windows filesystem boundary at that block size is extremely slow (the
+same trap hit and fixed manually with `bs=1M` earlier in the session) —
+still running in the background when this session ended, not blocking on
+it since `check_binary.sh` against the manually-extracted library already
+gives the citable, canonical result. Worth either waiting for it to finish
+or fixing its block size if this comes up again.
+
+**Artifacts, not committed:** `~/rtk-fw` (WSL, visible at
+`/mnt/c/Users/tim/rtk-fw` from Windows) holds the downloaded zip, the raw
+`.img`, and the extracted filesystem tree — roughly 5 GB across the manual
+extraction and the `check_image.sh` run's own copy. Not in the repo, not
+cleaned up yet.
+
+**Next steps, in priority order:**
+
+1. Same firmware-hunting approach against Reach M2 / RS2+ — the models the
+   Tier 2 hardware line is actually about now. Different filename pattern;
+   worth another documentation-search pass rather than more guessing.
+2. Let `check_image.sh` finish (or rerun with a larger `dd` block size) for
+   the full-pipeline corroboration, and consider whether the manual
+   Capstone-based inlining trace is worth turning into a reusable script —
+   `check_binary.sh` doesn't currently handle the "trace string present but
+   no named symbol" case, and this won't be the last binary where that's
+   true.
+3. Try dynamic confirmation — `qemu-user` running this exact `librtk.so`
+   against a crafted 1033 stream, or the Pi tier from §6b — to close the
+   static-vs-dynamic gap explicitly called out above.
+4. Everything from the 2026-08-09 session below is still open and unchanged
+   by this one: CFP decision, Tier 1 RF hardware purchase, rehearsal.
+
+---
+
+**Previous session:** 2026-08-09
 
 ## 2026-08-09: last research item closed, hardware list finalised, CFP landscape mapped
 

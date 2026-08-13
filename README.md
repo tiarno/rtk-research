@@ -53,6 +53,15 @@ The source of the defect is also present unchanged in
 [`emlid/RTKLIB`](https://github.com/emlid/RTKLIB) branch `reach`, the fork
 Emlid describe as "used in Reach RTK receiver" — a product ArduPilot documents
 as a supported RTK GPS, fed corrections over an unauthenticated radio link.
+**As of 2026-08-13 this is no longer just a source-code claim for one Reach
+product.** A firmware image Emlid serves publicly with no purchase or login
+(Reach Plus, v2.18.1, 2019) was downloaded and its `librtk.so` — RTKLIB 2.4.3,
+Emlid's own build — checked directly: the 1033 decoder is compiled in
+(inlined into `decode_rtcm3`, confirmed by cross-referencing its trace
+strings) and the library imports zero fortified libc symbols anywhere, so the
+corruption is silent there too. Reach M2 and RS2+, the currently-sold units,
+are not yet checked. See
+[research/README.md](research/README.md#the-shipped-firmware-not-just-the-source).
 
 The second is a software answer to the question the project started from: can a
 precision GNSS rover be manipulated while it continues to report a healthy fix?

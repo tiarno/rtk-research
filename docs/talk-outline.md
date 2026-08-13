@@ -217,10 +217,82 @@ wrong lesson and someone will leave with it. Turn immediately:
 - Reach is survey-grade kit people buy. ArduPilot documents it as a supported
   drone GPS: serial to the flight controller, corrections over the telemetry
   radio.
-- **Be explicit about the limit:** I read the source. I did not test the device.
-  I could not obtain the firmware without buying one. Either it corrupts
-  silently like everything else measured, or one packet knocks a survey receiver
-  off the air. Both are bad; I don't know which, and I'm not guessing.
+- **Updated 2026-08-13 — this is no longer just source.** Emlid serves
+  firmware images publicly, no purchase needed. Downloaded Reach Plus
+  (RS+/M+) v2.18.1, opened the disk image with no root (`dd` + `debugfs`),
+  and found `librtk.so` — RTKLIB 2.4.3, Emlid's own build. The 1033 decoder
+  is compiled in (inlined into the dispatcher, confirmed by tracing its
+  trace-string references in the disassembly) and the library imports zero
+  fortified libc symbols. Same result as everything else measured: silent
+  corruption, on an actual shipped product's actual firmware.
+- **Be precise about what's still a limit.** That's Reach Plus, an older
+  model, firmware from 2019. **Reach M2 and RS2+ — the models currently for
+  sale — are not yet checked**; their firmware isn't at the same predictable
+  URLs. Say "confirmed for Reach Plus's shipped firmware, source-only for
+  the current line" — not "Reach is hacked."
+- **Say plainly what this isn't.** No mass-market camera drone (DJI, Skydio,
+  the thing most of the room pictures when they hear "drone") runs RTKLIB —
+  different stack, and where they do RTK it's on-chip in the receiver
+  silicon, a different code path this bug never touches. That's a permanent
+  limit, not a hedge.
+- **Say plainly what it is instead.** RTKLIB is the de-facto open engine
+  behind a lot of unglamorous real RTK infrastructure that gets forked into
+  closed firmware without ever using the name — precision-ag autosteer,
+  survey/construction stakeout, marine autopilots, RTK mapping drones via
+  Reach. Blast radius is a property of *where in the trust chain* you inject
+  — a shared NTRIP mountpoint or CORS caster is fleet-wide; a single device's
+  correction link is one target. Not the drone in the room's head. Not
+  nothing, either.
+
+## 6b. The cheapest way onto real hardware §CUT
+
+Added 2026-08-13, prompted by the obvious follow-up to §6. Originally framed
+around "buying a Reach M2 (~$750–1,023) is the only path that names a
+specific commercial product's shipped firmware" — that premise didn't survive
+the day: the actual Reach Plus firmware turned out to be a free download, and
+checking it (see §6 above) settled the "named product" question for that
+model without spending anything. What's below is still worth doing, but for
+a narrower reason now — it closes the *dynamic vs. static* gap (nobody has
+run this code and watched the corruption happen live on ARM, as opposed to
+reading the binary), not the *product vs. source* gap. Two findings from
+checking this, one negative:
+
+**Dead end, checked and ruled out: AgOpenGPS / any `str2str`-based tractor
+setup.** The obvious "cheap tractor monitor" candidate — real farmers, real
+autosteer, commonly paired with RTKLIB's `str2str` to relay NTRIP corrections
+to the receiver. Read `str2str.c`/`streamsvr.c`: it only calls
+`input_rtcm3()` — the vulnerable decode path — when a stream converter is
+built, and that only happens if the `-out` argument carries an explicit
+`#format` tag. The standard relay invocation
+(`str2str -in ntrip://… -out serial://…`, no `#` suffix) never touches the
+decoder — it's a transparent byte pipe, format-agnostic by design. Rigging a
+`#rtcm3` tag on to force it would be demoing a configuration nobody actually
+runs. Not a real-world instance of this bug.
+
+**What does exercise it for real: `rtkrcv` / RTKNAVI — RTKLIB's own
+positioning engines**, because fully parsing RTCM3 into `sta_t` is their
+actual job, not incidental. And there's already a head start: `apt install
+rtklib` on Debian/Raspbian **ARM is already confirmed unfortified** —
+`research/README.md`'s "the distro package is unfortified too" — but that
+result came from **static analysis of the downloaded `.deb`** (checking for
+absent `_chk` symbols), not from running it and watching the corruption
+happen on physical ARM silicon. Nobody's done the dynamic run yet.
+
+| tier | hardware | cost | what it proves |
+|---|---|---|---|
+| 0 | `rtkrcv`/RTKNAVI on a laptop already owned + a cheap USB GPS dongle (VK-172, u-blox 7, ~$10) for genuine satellite lock | ~$10 | real unmodified RTKLIB, real sky, corruption on real (if non-embedded) hardware |
+| 1 | Raspberry Pi Zero 2 W (~$15) + microSD (~$8) + the same $10 dongle, running `apt install rtklib` | ~$35–50 | **first dynamic confirmation on real ARM**, not just symbol-table inspection — the embedded-Linux class this bug is framed around |
+| 1 + HITL | Tier 1 + the Pixhawk-class flight controller already on the hardware list below (~$200) | ~$235–250 | a real autopilot device physically consuming the corrupted position — no flight, no airframe needed |
+| 2 (existing) | Emlid Reach M2, ~$750–1,023 | ~$750–1,023 | the claim Tier 0/1 still *can't* make: that the **currently-sold** M2/RS2+ firmware carries the bug — the free Reach Plus download only settles this for that one, older product |
+
+No real base station is needed at any tier — the malicious correction is
+synthetic (`gen_rtcm.py`, already built), exactly as it is in every other
+measurement in this project. Tier 1 is still worth doing: for the price of a
+Raspberry Pi, it closes the dynamic-vs-static ARM gap that reading the Reach
+Plus binary didn't (that was static analysis too — see §6). Tier 2's job has
+narrowed since this was written: it's no longer "get any named product at
+all," it's specifically "confirm the current M2/RS2+ line," since Reach
+Plus's free firmware already did the former for free.
 
 ## 7. Live demo (8 min) — the payoff
 
@@ -359,6 +431,20 @@ stage, and it costs nothing.
 
 ## Hardware needed
 
+**Tier 0 — cheapest real-ARM confirmation (see §6b).** Not required for the
+stage demo; closes an open research gap (dynamic vs. static ARM proof) for
+the price of a Raspberry Pi.
+
+| Item | Qty | ~Cost | Note |
+|---|---|---|---|
+| Raspberry Pi Zero 2 W | 1 | $15 | runs `apt install rtklib` — already confirmed unfortified on ARM by static analysis; this makes it dynamic |
+| microSD card | 1 | $8 | — |
+| USB GPS dongle (VK-172, u-blox 7) | 1 | $10 | real satellite lock, no RTK capability needed — the malicious correction is synthetic either way |
+
+**Total: ~$33**, plus the Pixhawk-class flight controller already listed in
+Tier 3 (~$200) if a real device should physically consume the corrupted
+position rather than just log it.
+
 **Tier 1 — the conducted RF demo (the minimum to do §8 live).** The two
 Heltec V3s and the RF mechanism they carry are done (see §8) — everything
 else in this row is still not acquired, and the validation so far was
@@ -383,15 +469,67 @@ for the `esp32-rtcm-injector` repo. Current reality made this tier
 financially out of reach for now — see `esp32-rtcm-injector`'s
 `docs/HANDOFF.md` for the full lineup and the pivot to validating against
 real (free) RTKLIB software instead, which is what §8's over-the-air proof
-above actually did.
+above actually did. **Narrower job as of 2026-08-13:** a free firmware
+download already settled the fortified/unfortified question for Reach Plus
+(RS+/M+, see §6) — this tier's remaining job is confirming the same thing
+for **M2/RS2+ specifically**, the models currently sold, whose firmware
+wasn't found at a free/guessable URL.
 
 | Item | Qty | ~Cost | Buys you |
 |---|---|---|---|
-| Emlid Reach M2 (bare module, **no built-in radio**) | 1 | ~$749–1,023 | settles the fortified/unfortified question the source review could not — but its own matching LoRa radio accessory is discontinued; needs a 3rd-party UART radio |
-| Emlid Reach RS2+ (integrated, **built-in LoRa**) | 1 | ~$2,699 | the version that doesn't need a separate radio module — currently the cheapest Emlid unit with LoRa on board |
+| Emlid Reach M2 (bare module, **no built-in radio**) | 1 | ~$749–1,023 | settles the fortified/unfortified question **for M2 specifically** — Reach Plus is already settled for free, M2 isn't yet — but its own matching LoRa radio accessory is discontinued; needs a 3rd-party UART radio |
+| Emlid Reach RS2+ (integrated, **built-in LoRa**) | 1 | ~$2,699 | same settling, for RS2+ — the version that doesn't need a separate radio module, currently the cheapest Emlid unit with LoRa on board |
 | u-blox F9P board (ArduSimple simpleRTK2B) | 1 | ~$200 | real satellites, real observations feeding RTKNAVI |
 | Multi-band GNSS antenna + ground plane | 1–2 | $80–150 | needed by both of the above |
 | USB-TTL serial adapters (CP2102/FT232) | 2 | $20 | tap the serial link |
+
+**Used Reach hardware — same claim, lower price, added 2026-08-13.** A used
+M2/RS2+ unit is still Emlid's own firmware lineage, so it makes the same
+"current-model, named commercial product" claim a new one would — cost is
+the only thing that changes. (Reach Plus itself doesn't need this treatment
+any more — its firmware is a free download, see §6 — but a used M2/RS2+ is
+still the cheaper way to check the *currently-sold* models.) One data point:
+a Reach M2 with LoRa radio and accessories listed on the Emlid Community
+Forum's "For Sale" board, Feb 2026, at **$650** against a $1,200+ new-bundle
+price — roughly half. eBay and the Emlid forum's marketplace are the places
+to check, not general resale sites; this is specialist survey/drone gear
+with a small secondary market. Two things to verify before relying on a used
+unit, not just to save money:
+
+- **Pin the firmware version, don't let it auto-update.** ReachView can pull
+  a newer build the moment it's connected to Emlid's account/cloud; the
+  analysis in this project is against the published source, not against
+  whatever firmware happens to ship with a specific secondhand unit. Check
+  the installed version before connecting it to anything that might update
+  it, and treat "unverified" and "confirmed-vulnerable" as different claims
+  until it's checked — same discipline as `check_binary.sh` elsewhere in this
+  project.
+- **Older, cheaper Emlid units are the same codebase family, and likely
+  cheaper still.** Emlid's original "Reach" module and "Reach RS" stopped
+  getting firmware updates after version 29 (Emlid Community Forum,
+  "29 firmware version discontinues support for Reach Module and Reach RS")
+  — unsupported means unwanted means cheap on the secondary market, and an
+  old frozen firmware build is, if anything, *less* likely to have picked up
+  any future hardening than a currently-sold unit. Pricing not checked yet;
+  worth a direct look at eBay/the Emlid forum before assuming Reach M2 is the
+  floor.
+
+**This only works for Emlid specifically — it doesn't generalise to "any
+cheap used GNSS receiver."** Most of the alternative brands that come to
+mind (ArduSimple, SparkFun RTK Facet, similar) do RTK on-chip in u-blox
+firmware; RTKLIB only enters the picture if someone separately runs it on a
+companion computer, same as the Tier 0/1 Pi path — buying the receiver
+used doesn't change that. Which other commercial products embed an
+RTKLIB-derived engine in their *own* firmware was an open question this
+project had flagged and not answered — as of 2026-08-13 it's answered for
+*one* vendor (Emlid, via the free Reach Plus firmware download, see §6),
+not for the category. [rtk-rtklib-research-notes.md](rtk-rtklib-research-notes.md)
+item C has the update. Buying a random cheap used receiver from some other
+vendor on a hunch is still a gamble unless there's an actual lead (a
+teardown, a forum post, a leaked firmware image) pointing at it — the method
+that worked for Emlid (search for exact firmware filenames rather than
+guessing blindly, then check the vendor's own CDN for free, unauthenticated
+downloads) is worth trying first before assuming a purchase is required.
 
 **Tier 3 — nice to have, not required.**
 
@@ -401,6 +539,14 @@ above actually did.
 | Heltec/Ebyte SX1262 module, 433 MHz variant | $30 | Path B experiments |
 | Saleae-class logic analyser | $100+ | serial framing on the receiver side |
 | Pixhawk-class flight controller | $200 | hardware-in-the-loop instead of SITL |
+
+**Flight tier — a real airframe, not SITL/HITL.** Separate track, added
+2026-08-13, not part of the numbered tiers above and not required for the
+stage demo. Breaks the conducted-only rule below by necessity (an aircraft in
+the air can't be reached by coax) — contained instead by low TX power and
+site selection. Full list, safety preconditions, and open questions in
+[flight-hardware.md](flight-hardware.md). Roughly $1,630–$1,930, nothing
+ordered.
 
 **Deliberately not on the list:** any transmit-capable SDR (HackRF, PlutoSDR).
 Not needed — the SX1262 boards do the job with far less chance of an accident —
@@ -555,7 +701,8 @@ and we built an entire industry on a broadcast nobody signs."*
 | "Real drones use an F9P, not RTKLIB." | Correct, and worth conceding. The F9P does RTK on-chip. Reach is the counter-example, and ArduPilot documents it. |
 | "Isn't that a niche configuration?" | No. It's not the compiled default, but of the seven example configs RTKLIB ships, the only one set up for real-time RTK is the only one that enables it. Post-processing and single-point modes have no stream to take a base position from. |
 | "Wouldn't it show up in the logs?" | No. Max verbosity logs 31 characters of attacker-chosen text and never the length; the coordinate adoption isn't traced at all. |
-| "Did you test real hardware?" | Split answer: no GNSS receiver product (no Reach, no F9P board) — but yes, real radios. Two Heltec V3s (the same SX1262 Reach uses) sent the actual attack over real LoRa RF into RTKLIB's own unmodified decoder, corrupting the coordinate by the predicted amount. Say exactly which half is real and which is still simulated; don't blur them together in either direction. |
+| "Did you test real hardware?" | Three-part answer as of 2026-08-13. Real radios: two Heltec V3s (the same SX1262 Reach uses) sent the actual attack over real LoRa RF into RTKLIB's own unmodified decoder. Real firmware: Reach Plus's (RS+/M+) actual shipped firmware, downloaded free from Emlid, confirmed unfortified by reading the binary. Not done: M2/RS2+ (the current models) firmware, and no device was ever powered on and attacked live — the firmware check was static, not dynamic. Say exactly which parts are real, which are simulated, and which are "real but only read, not run" — three different claims, don't blur them. |
+| "If you added the Pi + Pixhawk tier (§6b), doesn't that prove a real device is vulnerable?" | Refine, don't just say no — by 2026-08-13 a real device's firmware is already confirmed (Reach Plus, see above), so the Pi tier's value shifted. It proves the *dynamic* case: watching the corruption actually happen on running ARM silicon, not just reading a binary statically — nobody's done that yet, for Reach Plus or Debian's package either. It still doesn't touch M2/RS2+, and it still runs the open reference RTKLIB, not any vendor's exact build. As of this writing Tier 0/1 hasn't been built — don't claim the dynamic run happened until it has. |
 | "Did you transmit?" | For the stage demo: conducted only, into a shielded enclosure, never radiated. The bench validation that proved the LoRa mechanism works at all (§8) was low-power open-air at ~1 m, 2 dBm — say so if asked specifically about that, don't let "conducted only" cover testing it didn't apply to yet. |
 | "Is this a 0-day?" | No. Public since June 2026. What's new is where the spill lands and which builds fail silently. |
 | "Why can't the attacker pick any error size, not just four settings?" | Because the write zeroes whole bytes of an IEEE-754 double, low end first, and each extra byte is 8 more bits — a 256x jump in the smallest change that byte can represent. Decimal digits go up by 10x; these slots go up by 256x. That's why the usable settings are millimetres, metres, kilometres, planets and nothing in between. |
