@@ -1,6 +1,144 @@
 # Handoff Notes
 
-**Session date:** 2026-08-13
+**Session date:** 2026-08-31
+
+## 2026-08-31, later: PR #801 filed
+
+[tomojitakasu/RTKLIB#801](https://github.com/tomojitakasu/RTKLIB/pull/801),
+open, targets `master`. Same session as the decision below — from decision to
+filed PR in one sitting.
+
+**What happened before filing, worth keeping:** a fresh subagent (no access to
+this repo, everything handed to it inline — the vulnerable function, the
+`sta_t` struct, the adoption call site, the diff, the verification results,
+and the draft PR text) did an independent pass and caught two real problems in
+the PR *text* (not the code, which was already correct on both branches):
+
+- **Wrong boundary number.** The draft said "a declared length above 31 writes
+  past the field." `MAXANT` is 64, so the actual out-of-bounds boundary is
+  length > 63 — 31 is where content stops being attacker-controlled (the
+  staging buffers' read loops cap there), a different threshold from where
+  the destination field overflows. Confirmed against `rtklib.h` before
+  fixing. Corrected in the PR body and in both commit messages (amended,
+  unpushed at the time).
+- **Overclaimed branch parity.** "Applies unchanged to rtklib_2.4.3" implied
+  the literal diff text could be copy-pasted across branches. It can't —
+  2.4.3 has one extra unrelated line (`sprintf(rtcm->sta.name,...)`) right at
+  the insertion point, which would break a literal `git apply`. The two
+  branches were in fact generated and verified separately, just described
+  imprecisely. Reworded to say so.
+
+Also confirmed and *not* acted on, both deliberate: `rtksvr.c`'s
+`update_antpos()` still has no `norm(sta.pos,3)>0.0` guard (the asymmetry
+with `postpos.c` that this PR doesn't close, since the clamp prevents the
+corruption at the source instead) and the misalignment defect isn't mentioned
+in the PR at all, matching the still-open decision below on whether it gets
+its own issue.
+
+**Mechanics, for next time:** WSL has no `gh` installed; its git credential
+helper needs to shell out to the Windows install via interop
+(`gh.exe`, reachable at `/mnt/c/Program Files/GitHub CLI/gh.exe` and on WSL's
+inherited `PATH`) rather than the missing native `gh`, which otherwise hangs
+on an interactive credential prompt with no TTY rather than failing fast.
+
+**Next:** decide whether to open the second PR against `rtklib_2.4.3` (kept
+as a clean, separately-verified branch, not yet pushed) — offered in #801's
+body as optional, not committed to. Held off deliberately: #801 has had no
+engagement yet, and a second PR against an unresponsive maintainer reads as
+pushier, not more thorough.
+
+**Blog is otherwise ready, holding on a deliberate wait.** Same session,
+after filing: got an independent review of the patch and the PR text before
+filing (caught two real inaccuracies, fixed before it went out — see above),
+then a second external review of the *blog draft* itself, which caught a
+genuine ~600x arithmetic error in Part 6's mantissa table (row 1) that the
+reviewer didn't even flag themselves — found by redoing their math against
+the real IEEE-754 numbers, not just trusting either the article or the
+review. Also reconciled an internal inconsistency (Part 8 was quoting a
+different, non-representative rung than the one Part 6 calls universal) and
+fixed a real "the fix is incomplete" claim from the reviewer — checked
+against the actual source and it doesn't hold; the clamp and the misalignment
+defect don't interact, confirmed by tracing exactly which code runs before
+vs. after the clamp. Then a separate pass cut about ten "not X but Y" /
+self-congratulatory constructions the writing had accumulated — Tim
+confirmed the result reads better and asked to default to that going
+forward (see memory).
+
+A local preview is live: `content/articles/gps-certain-and-wrong.md` in the
+`reachtim` repo (untracked, not pushed — that repo is public), rendered via
+`.venv/Scripts/python build.py --serve` at `localhost:8000`. Frontmatter date
+is a placeholder (`2026-09-03`), not a decision.
+
+**Two things block actually publishing, both deliberate holds, not blockers
+to fix:**
+1. Wait a few days after filing #801 before publishing — courtesy, not risk
+   management (the fix is already public in the PR diff regardless of
+   merge status). No PR-outcome gate: given the maintainer's silence since
+   2020, "wait and see what happens to the PR" could mean waiting
+   indefinitely, which the article itself argues against.
+2. `tiarno/rtk-research` (this repo) is still **private** (toggled
+   2026-07-27, never reopened) — the blog's closing line points to
+   `research/README.md` as the technical backing and currently reads
+   `[TODO: link once the research repo is public]`. Needs deciding before
+   publish: make it public, or handle the pointer differently.
+
+**As of this entry: nothing to do until the wait period is up.** Next
+session, revisit both holds above.
+
+## 2026-08-31: talk track dropped — target is now PR + blog only
+
+Decision, not a research result: the hardware collaborator isn't interested in
+a talk or paper, and the talk was not going to happen solo. **The talk track
+is dropped entirely.** Everything under it in this file and in
+[talk-outline.md](talk-outline.md) is now inert, not just deprioritised:
+
+- CFP selection (`cfp-options.md`) — moot, nothing will be submitted.
+- Tier 1/2/3 RF hardware, the flight-hardware track (`flight-hardware.md`) —
+  nothing more to buy or bench-test for a demo that isn't happening.
+- Demo rehearsal/staging, including the Reach Plus qemu demo staging checklist
+  — no stage to rehearse for.
+- The reason the patch PR was being held back — "spend the leverage on the
+  talk slide" — no longer applies. See below.
+
+**The new target: file the RTKLIB patch PR, then publish the blog article.**
+Both were already most of the way there — the fix is written and verified
+(`research/check_clamp.sh`), the blog is drafted
+([blog-1033-draft.md](blog-1033-draft.md)) — this session's job was
+re-confirming state, not new research.
+
+**PR readiness, checked this session:**
+- `~/RTKLIB` (WSL) is clean, on `rtklib_2.4.3` @ `180043e`, matching what's
+  measured throughout `research/README.md`.
+- `gh auth status` — authenticated as `tiarno`, `repo` scope present, no
+  existing fork of `tomojitakasu/RTKLIB` under that account yet.
+- **Issue #799 is still open, still exactly two comments** — Raefko's original
+  report (2026-06-09) and the 2026-07-27 analysis comment. No maintainer reply
+  in the five weeks since, on top of no commit to any release branch since
+  2020-12-29. The "wait for a response" reasoning has run its course; nothing
+  suggests waiting longer changes anything.
+- **Open question, not yet resolved:** which branch to target. Upstream's
+  GitHub default branch is `master`, but `master` is the *older* code
+  (2.4.2 p13, 2018) — `rtklib_2.4.3` (2.4.3 b34, Dec 2020, where everything in
+  this project was measured) is actually newer despite the name. The fix
+  needs verifying against `master`'s copy of `rtcm3.c` before assuming the
+  same patch applies there unchanged.
+
+**Blog readiness.** `blog-1033-draft.md`'s own header comment already lays out
+what changes now that there's no talk (the "IF THERE IS NO TALK" branch):
+release the length-to-magnitude lookup table Part 6 currently withholds, add
+the misalignment defect (not in FuzzingLabs' report, currently undocumented in
+the article), and strengthen the product-relevance argument. Plus the two
+still-open "must fix" blockers from the same comment: an explicit
+FuzzingLabs "what's theirs / what's new" passage, and re-anchoring every
+time-relative phrase ("no reply in seven weeks") to an absolute date with a
+visible "status as of" line. Natural order: file the PR first, so Part 13 can
+say "filed, still unmerged" instead of "not filed yet."
+
+**Research items still open (M2/RS2+ firmware, `str2str`/`convbin` on the
+Reach image) are no longer talk-blocking — they'd strengthen the blog if
+resolved, but aren't required to publish it.**
+
+---
 
 ## 2026-08-13, later: watched the actual shipped binary corrupt itself, live
 

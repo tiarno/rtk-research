@@ -6,54 +6,43 @@ tags: [gnss, rtk, rtklib, drones, vulnerability-research]
 summary: >
   A single fake antenna name can move a survey rover two metres while it insists
   it has a perfect fix — or, on a differently-compiled copy of the same program,
-  bring a drone down wherever the attacker likes. A long walk through how, for
-  people who have never touched GPS software.
+  bring a drone down within tens of metres of wherever the attacker chooses. A
+  long walk through how, for people who have never touched GPS software.
 ---
 
 <!--
-DRAFT - NOT PUBLISHED. Status as of 2026-07-31.
+DRAFT - NOT PUBLISHED. Status as of 2026-08-31.
 
-No publication date. A talk may or may not happen; this article does not depend
-on that decision and is written to stand alone.
+DECIDED 2026-08-31: no talk, no paper. Target is the RTKLIB patch PR, then
+this post. Publish after the PR is filed, so Part 13 can say "filed, still
+unmerged" instead of "not filed yet."
 
-MUST FIX BEFORE PUBLISHING - do not skip these, they are not polish:
+MUST-FIX ITEMS, ORIGINAL LIST:
 
-1. FUZZINGLABS ATTRIBUTION. They found and reported the overflow (2026-06-09,
-   RTKLIB issues #796-799) and described it accurately. This article mentions
-   them once. Add an explicit "what is theirs / what is new here" passage right
-   after the bug is introduced, or the piece reads as though it is claiming
-   their find. See research/README.md, "Relationship to the FuzzingLabs
-   disclosure", which already does this properly.
+1. FUZZINGLABS ATTRIBUTION — DONE 2026-08-31. Added "What's theirs, and
+   what's new here" right after the bug is introduced.
+2. TIME-RELATIVE PHRASES — DONE 2026-08-31. Part 13/14 re-anchored to
+   absolute dates; added a "status as of" line near the top.
+3. THE UNNAMED FORK — RESOLVED 2026-08-13, see below. Reach Plus (RS+/M+)
+   firmware confirmed directly; Reach M2/RS2+ still unchecked and the article
+   already distinguishes the two.
 
-2. TIME-RELATIVE PHRASES ROT. Part 14 says "no reply in seven weeks" and Part 13
-   says "a few days ago". Both were true on 2026-07-31 and will be wrong later.
-   Re-anchor to absolute dates and add a visible "status as of <date>" line so a
-   stale post is obviously stale rather than quietly wrong.
+SINCE THERE'S NO TALK, ALSO DONE 2026-08-31: added the misalignment defect
+(not in FuzzingLabs' report) at the end of Part 5, released the
+declared-length column in Part 6's table, and added a paragraph in Part 14
+naming the broader product landscape beyond Reach (unconfirmed elsewhere,
+framed as such).
 
-3. THE UNNAMED FORK. Part 14 says "at least one commercial GPS manufacturer's
-   public fork". It is emlid/RTKLIB, branch `reach`, a public repository -
-   naming it is a statement of fact. RESOLVED 2026-08-13 for one product: a
-   freely-downloaded Reach Plus (RS+/M+) firmware image was checked directly
-   and confirmed to carry the same unfortified decoder. Reach M2/RS2+, the
-   currently-sold line, are still unchecked - the PRODUCT claim now needs to
-   distinguish "Reach Plus's actual firmware: confirmed" from "the rest of
-   the Reach line: source only" rather than treating Reach as one undivided
-   claim. See research/README.md, "The shipped firmware, not just the
-   source."
+STILL OPEN before publishing:
+- File the RTKLIB PR, then update Part 13's "not filed yet" language.
+- Decide whether the frontmatter `date:` (still 2026-07-31) should become the
+  actual publish date, or stay as a drafted-on date with a separate published
+  date added.
 
-IF THE TALK HAPPENS FIRST: drop the "I am not publishing the lookup table" note
-in Part 6 - holding back from readers what a room was shown reads badly - and
-link the slides or video at the top.
-
-IF THERE IS NO TALK: consider adding the second defect (the misalignment bug,
-which is not in FuzzingLabs' report), strengthening the product-relevance
-argument, and releasing the length-to-magnitude table, since holding it back
-then serves nothing.
-
-Numbers in this article are checked against research/README.md as of 2026-07-31.
-The mantissa table in Part 6 was generated, not reasoned about, and reproduces
-three independently measured values: the 5 mm case, the 1.800 m stage-demo
-delta, and the 2.4348 m result.
+Numbers in this article are checked against research/README.md as of
+2026-08-31. The mantissa table in Part 6 was generated, not reasoned about,
+and reproduces three independently measured values: the 5 mm case, the
+1.800 m stage-demo delta, and the 2.4348 m result.
 -->
 
 There is a bug in a piece of free software called RTKLIB that I have been
@@ -67,13 +56,16 @@ No crash. No warning. Nothing in any log.
 
 I flew a simulated drone into it and the aircraft did exactly what it was told,
 arrived where it believed it had been sent, and shut down normally — while
-sitting well over a metre from where it thought it was. Then I rebuilt the same
+sitting well over a metre from where it actually was. Then I rebuilt the same
 software with one different compiler setting and flew it again, and this time
 the aircraft fell out of the sky on cue.
 
 This post is the long version, written for people who have never thought about
 GPS software in their lives. If you already know what a mantissa is, you can
 skim; I am going to explain everything.
+
+*Status as of 2026-08-31. Dates below are absolute rather than "a few weeks
+ago," so this post stays legible after the week it was written.*
 
 ---
 
@@ -256,7 +248,22 @@ happens to sit next in memory.
 ```
 
 That is a buffer overflow, and a security firm called FuzzingLabs found and
-reported it, along with three similar ones, in June 2026.
+reported it, along with three similar ones, on 2026-06-09.
+
+### What's theirs, and what's new here
+
+FuzzingLabs found this — the overflow, the unbounded length, the missing
+check — and reported it accurately: an out-of-bounds write, attacker-controlled
+length, reachable over an unauthenticated correction stream. That part is
+theirs, and Part 14 credits it in full.
+
+What their write-up doesn't do is follow the spillover to where it lands. It
+frames this as a memory-corruption bug and stops there — it never mentions the
+base station's coordinates, and their own proof-of-concept drives a field that
+can't reach them. Everything from here on — which of the five text fields
+actually reaches the coordinates, what erasing rather than overwriting them
+does, whether the receiver notices, and which real programs corrupt silently
+versus crash — builds on their find.
 
 ### Why it looks boring
 
@@ -280,13 +287,37 @@ There is nothing there worth hitting. No return addresses, no function pointers,
 none of the machinery an exploit would need.
 
 So: a bug that writes zeros into the middle of a large object it cannot get out
-of. Automated memory-checking tools report nothing at all for the case I care
-about, because in that case nothing technically goes out of bounds.
+of. It is still out of bounds for the 64-byte slot it is writing into — the
+most common automated memory-checking tools just don't watch for that. They
+track the edges of a whole allocation; the boundary between two fields inside
+it is smaller than what they watch, so a write that crosses that boundary but
+stays inside the container passes silently. A finer-grained check, one that
+knows the declared size of each individual field, catches it immediately.
 
 Boring.
 
 Except for what happens to be sitting a couple of hundred bytes past the
 receiver-model slot.
+
+### A second bug, not in FuzzingLabs' report
+
+I found this one while checking that my fix didn't break anything else, and
+it has nothing to do with the coordinates.
+
+Each of the five text fields is read using its own length, computed from a
+running position in the message. But the loop that actually copies the
+characters only ever advances by the 31 bytes it read — never by however many
+the sender declared. So if an *earlier* field claims to be longer than 31
+characters, every field parsed after it gets read from the wrong spot in the
+message. The lengths still come out right, because those are read separately;
+only the contents shift. The result looks like an ordinary receiver serial
+number that happens to be nonsense, not an obvious parse failure.
+
+Every read stays inside the message, so this stays out of memory-safety
+territory, and the field the coordinate attack depends on is read before the
+walk drifts off course, so that attack is unaffected. Worth mentioning
+anyway: it's the same shape as the main bug, a length taken off the wire and
+never checked against what actually happened.
 
 ## Part 6: What the zeros land on, and what a mantissa is
 
@@ -334,8 +365,8 @@ exponent handles bigness; the mantissa handles precision.
 
 Fifty-two binary digits is a lot of precision. For a number around four million
 — which is roughly what our coordinate is, measured in metres — those 52 bits
-let you specify a position down to about a *billionth of a millimetre*. Far
-finer than anyone needs.
+let you specify a position down to about *half a millionth of a millimetre*,
+under half a nanometre. Far finer than anyone needs.
 
 ### Now erase some digits
 
@@ -392,7 +423,7 @@ test data. The base station's true X position is `-3,978,242.4348` metres:
                                  |      |
                                  +----->+
                                   snaps to the nearest
-                                  surviving mark, downwards
+                                  surviving mark, toward zero
 
                                   new coordinate: -3978242.0000
                                   the base has "moved" 0.43 m
@@ -404,14 +435,14 @@ station's own coordinates.
 
 Running that for every number of erased bytes, on the same real coordinate:
 
-| bytes erased | mantissa digits left | resulting grid | coordinate becomes | error |
-|---|---|---|---|---|
-| 1 | 44 | 0.0000002 mm | −3978242.4348 | none you could measure |
-| 2 | 36 | 0.03 mm | −3978242.4348 | none you could measure |
-| 3 | 28 | 8 mm | −3978242.4297 | **5 mm** |
-| 4 | 20 | **2 m** | −3978242.0000 | **0.43 m** |
-| 5 | 12 | 512 m | −3978240.0000 | **2.43 m** |
-| 6 | 4 | 131 km | −3932160.0000 | 46 km |
+| bytes erased | declared length | mantissa digits left | resulting grid | coordinate becomes | error |
+|---|---|---|---|---|---|
+| 1 | 208 | 44 | 0.00012 mm | −3978242.4348 | none you could measure |
+| 2 | 209 | 36 | 0.03 mm | −3978242.4348 | none you could measure |
+| 3 | 210 | 28 | 8 mm | −3978242.4297 | **5 mm** |
+| 4 | 211 | 20 | **2 m** | −3978242.0000 | **0.43 m** |
+| 5 | 212 | 12 | 512 m | −3978240.0000 | **2.43 m** |
+| 6 | 213 | 4 | 131 km | −3932160.0000 | 46 km |
 
 Each extra byte erased multiplies the coarseness by 256, because that is what
 eight more binary digits does. The coordinate gets snapped down to the nearest
@@ -434,10 +465,11 @@ producing a confident answer at all and the attack becomes obvious.
 There is a narrow band where the damage is big enough to matter and small enough
 to stay invisible, and it is reachable without knowing anything about the target.
 
-*(I am describing the mechanism, not publishing the lookup table of which
-declared lengths produce which rungs. Anyone determined can derive it from public
-source code in an afternoon, but there is a difference between derivable and
-handed over.)*
+The "declared length" column above is arithmetic anyone can redo from the
+public source in an afternoon — offset of the coordinates, minus offset of the
+field, minus the 31 bytes that get read correctly. It's in the table now
+because there's no longer a reason to make a reader do that arithmetic
+themselves.
 
 ## Part 7: The message that triggers its own damage
 
@@ -460,13 +492,20 @@ processing recorded data after the fact, rather than live. **That path checks.**
 Before adopting a base position it verifies the coordinate is not obviously
 broken.
 
-Somebody thought about this problem. The check went into the path that reads a
-file on your desk after the flight, and not into the path that takes bytes off a
-radio in real time.
+Somebody thought about this problem. The check lives in the path that reads a
+file on your desk after the flight. The path that takes bytes off a radio in
+real time has no equivalent.
 
 ## Part 8: What the receiver does about it
 
 Nothing. That is the finding, and it took me a while to believe it.
+
+This particular run used a longer declared length than the 2-metre rung from
+Part 6 — the coarser, less predictable setting, chosen here because it
+happened to produce a clean, sizeable number against this base station. The
+point below (whether the receiver's quality flags notice) doesn't depend on
+which rung was used; it just needed one that was large enough to be
+unmistakable in a table.
 
 I ran a clean data set and an attacked one all the way through, and compared
 every single position the receiver produced:
@@ -541,10 +580,9 @@ It is wrong. **Every build I have measured corrupts silently.**
 **Both Windows distributions.** I downloaded the official Windows tools and the
 popular demo5 fork, fed them the malicious message, and watched them write a
 corrupted base station coordinate into their own output files. Exit code zero, no
-complaint. And this is not a safety check somebody forgot to enable — the feature
-belongs to the GNU C library, and these are built with a different compiler
-against different libraries where it does not exist to enable. It was never on
-the menu.
+complaint. The feature belongs to the GNU C library; these are built with a
+different compiler, against different libraries, where it doesn't exist to
+enable. It was never on the menu.
 
 **Debian's own package.** This is the one that killed my prediction. Debian
 packages RTKLIB, at exactly the version I had been studying, built for every
@@ -560,7 +598,7 @@ So installing this from your Linux distribution, on ARM, lands in the silent
 corruption column alongside everything else.
 
 The crash is what you get by compiling the software yourself with the right
-settings. It is not what anybody ships.
+settings — nobody ships it.
 
 *(One footnote for the suspicious: the internal layout that determines exactly
 which erasures reach the coordinate turns out to be identical across every
@@ -652,8 +690,7 @@ four distinct errors while doing it.
 
 ### Which is worse?
 
-Instinct says the crash. Instinct is wrong, and this is the most transferable
-thing I have to say.
+Instinct says the crash. Instinct is wrong.
 
 Every autonomous system is built to handle *"my sensor stopped working."* That is
 an expected condition with a plan attached: raise an alarm, stop, hand back
@@ -677,8 +714,7 @@ one line from the crashed drone's log:
 ```
 
 With no position, the drone **could not fly home**. It did not know where home
-was. Landing immediately was not one option among several — it was the only thing
-available to it.
+was. It had exactly one option: land immediately.
 
 Now ask who decides *when* that happens.
 
@@ -709,8 +745,8 @@ nobody watching cannot be rescued.
 
 ### Two weapons, and no safe option
 
-The honest way to put this is that the two builds hand an attacker **different
-tools**. Neither one is the harmless case.
+The two builds hand an attacker **different tools**. Neither one is the
+harmless case.
 
 ```
                     ONE MALICIOUS MESSAGE
@@ -775,30 +811,33 @@ the same data through both: the attacked streams come back at the true
 coordinate, and legitimate messages decode identically, so the change costs
 nothing that a real base station would notice.
 
-I have not filed it as a patch yet. I posted the analysis publicly on the bug
-report a few days ago and I am waiting to see whether anyone responds first.
+I posted the analysis publicly on the bug report on 2026-07-27. As of
+2026-08-31 there had been no reply, so I filed the fix as
+[PR #801](https://github.com/tomojitakasu/RTKLIB/pull/801) — filed, not
+merged.
 
 ## Part 14: Where this actually stands
 
 None of this is a secret. The bugs were reported publicly in June 2026 and the
 analysis has been public since.
 
-All four reports are still open and unpatched. Each carries a single comment from
-the person who found them, offering to file the paperwork for an official
-vulnerability identifier and asking the maintainer how they would like to handle
-it. There has been no reply in seven weeks.
+All four reports have been open and unpatched since 2026-06-09. Each carries a
+single comment from the person who found them, offering to file the paperwork
+for an official vulnerability identifier and asking the maintainer how they'd
+like to handle it. As of 2026-08-31, neither that comment nor mine (posted
+2026-07-27 on #799) has drawn a reply.
 
-The demo5 fork shipped a new release **thirteen days after** the bugs were made
-public, with the flaw untouched.
+The demo5 fork shipped a new release on 2026-06-22 — **thirteen days after**
+the bugs were made public — with the flaw untouched.
 
 So "wait for the patch" is not advice that means anything here. There is nobody
 to wait for. I would rather say that plainly than imply a fix is on its way.
 
 The same code is also present, unchanged, in Emlid's public fork of RTKLIB —
 same flaw, same internal layout, same missing check on the live path. For a
-long time that was an observation about published source code only, and the
-honest statement was "the source is affected," not that any product behaves
-any particular way.
+long time that was an observation about published source code only: the source
+is affected, which is a different claim from any particular product behaving
+that way.
 
 That changed for one Emlid product. Their firmware images are served
 publicly with no purchase or login required. I downloaded one — Reach Plus
@@ -809,8 +848,8 @@ The decoder is in there — inlined into the message dispatcher rather than
 kept as its own named function, confirmed by tracing both of its diagnostic
 strings back to live code inside it — and the library imports not one
 fortified libc symbol. Same silent-corruption result as everything else
-measured in this piece, now confirmed against an actual shipped product's
-actual firmware, not just its published source.
+measured in this piece, this time on an actual shipped product's actual
+firmware.
 
 Reach M2 and RS2+ — the models currently for sale — are not yet checked.
 Neither is whether Emlid's current firmware differs from this 2019 build.
@@ -840,11 +879,20 @@ message counters matched what I'd sent exactly, and the console's own error
 log had nothing in it. I shut it down cleanly afterward with its own
 `shutdown` command; nothing crashed.
 
-That closes the gap this section opened with — not "the source is
-affected," and not "the firmware contains it," but "I ran it and watched it
-happen." What's still open: Reach M2 and RS2+ remain unchecked, and this was
-emulation, not the receiver itself powered on. Both matter; neither erases
-what the emulator run settled.
+This section started with a claim about source code, then a claim about
+firmware contents. It ends with the actual program running and reporting the
+corrupted position itself. What's still open: Reach M2 and RS2+ remain
+unchecked, and this was emulation, not the receiver itself powered on. Both
+matter; neither erases what the emulator run settled.
+
+Reach is one confirmed instance of something bigger than one product. RTKLIB
+is permissively licensed, which is exactly what lets it get folded into closed
+firmware that never uses its name — one way to find another instance is the
+way this one turned up: look at what a device actually ships, not what a
+spec sheet claims. Precision-agriculture autosteer, survey and construction
+stakeout, marine autopilots, and RTK-equipped mapping drones all draw from the
+same small pool of open positioning code Reach draws from. Which of them,
+specifically, remains untested.
 
 ## Part 15: What I did not do
 
@@ -897,4 +945,7 @@ point where a value is simply taken on faith.
 
 *Corrections welcome. Everything above is reproducible, and if you can show me a
 shipped build that lands in the crash column, I would genuinely like to hear
-about it — I have not found one.*
+about it — I have not found one. The full technical writeup — exact source,
+struct offsets across six architectures, the reproduction harness, sanitizer
+output, and every script used to generate a number in this piece — is at
+[TODO: link once the research repo is public].*

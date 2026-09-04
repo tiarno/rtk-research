@@ -256,6 +256,25 @@ wrong lesson and someone will leave with it. Turn immediately:
   — a shared NTRIP mountpoint or CORS caster is fleet-wide; a single device's
   correction link is one target. Not the drone in the room's head. Not
   nothing, either.
+- **Added 2026-08-13 — anticipate "what about military drones, like
+  Ukraine's."** Same test as the DJI line: does the platform run RTKLIB and
+  take corrections over a link an attacker can reach. Strike/FPV drones
+  (kamikaze quads, loitering munitions) mostly fail that test on both counts
+  — the operational trend there is *away* from live RTK links, not toward
+  them, because a wireless correction stream is one more thing for EW to
+  kill; fiber-optic control, inertial dead-reckoning, and terminal image
+  matching exist precisely to avoid depending on RF in that environment.
+  Where it plausibly does reach into a conflict zone is the same civilian
+  niche this section already names, relocated: RTK-tagged demining/UXO
+  survey and damage-assessment mapping drones, running the same Reach-class
+  hardware as a farm survey, just operated by a military engineering unit.
+  Framing for the room: not "military drones are also vulnerable" (unverified,
+  overclaims), but "this doesn't touch strike drones — they've moved away
+  from live RTK for the same EW reasons that make this bug interesting
+  elsewhere; where it does reach a conflict zone is the boring stuff,
+  demining and mapping survey, running the exact same stack as Iowa."
+  Not independently verified against any specific platform — reasoning from
+  the same trust-chain test above, not a new finding.
 
 ## 6b. The cheapest way onto real hardware §CUT
 
