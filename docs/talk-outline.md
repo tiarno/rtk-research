@@ -145,15 +145,17 @@ The most transferable insight in the talk.
 
 - Two outcomes depending on the build: fortified `strncpy` **aborts** (loud,
   one packet = DoS); unfortified **corrupts silently**.
-- Downloaded and ran the real thing: official Windows tools, and the demo5 build
-  most low-cost users run. Both wrote a base position 2.4 m from truth. Exit
+- Downloaded and ran the real thing: official Windows tools, and demo5, the
+  widely used community fork. Both wrote a base position 2.4 m from truth. Exit
   code 0.
 - **The line:** this is not a safety check somebody forgot to switch on. The
   check is a glibc feature; those are Embarcadero builds against the Windows
   CRT, which import no `*_chk` at all. *It was never on the menu.*
 - **Then the part I got wrong.** I expected Linux to be the safe side. Debian
   ships RTKLIB 2.4.3 b34 for **12 architectures** — and the armhf build imports
-  no `*_chk` either. On ARM. From a distribution whose policy is to enable it.
+  no `*_chk` either. On ARM. Debian's hardening policy nominally applies
+  fortification; this package's import table shows it never took effect (the
+  likely cause, upstream makefiles overriding `CFLAGS`, is unconfirmed).
 - **Conclusion, stronger for having been surprised:** the abort is what you get
   by compiling it yourself with `_FORTIFY_SOURCE=2` or higher (level 1 still
   corrupts silently). Of everything measured, **one** vendor line ships that
@@ -191,10 +193,10 @@ wrong lesson and someone will leave with it. Turn immediately:
   like, and the aircraft comes down near wherever it was. That is a
   denial-of-flight primitive with attacker-chosen timing — and the *unfortified*
   build cannot do it.
-- **Measured** (`land_drift.py`, same run): 15 m hover, 29 s descent,
-  **10.13 m of horizontal drift** between GPS loss and touchdown, monotonic —
-  it slides one way and never comes back. So the attacker picks a **circle of
-  tens of metres**, not a point.
+- **Measured** (`land_drift.py`, two runs): 15 m hover, 29 s descent,
+  **10.1 m and 10.8 m of horizontal drift** between GPS loss and touchdown,
+  monotonic — it slides one way and never comes back. So the attacker picks a
+  **circle about ten metres across in still air**, more in wind, not a point.
   - Works: a lake, a river, a field, the far side of a fence.
   - Doesn't: a lane of traffic, a specific roof.
   - **10 m is the floor** — zero wind, low hover, near-stationary. Say this
@@ -263,16 +265,17 @@ wrong lesson and someone will leave with it. Turn immediately:
   RS2+ at all. Say "current M2/RS2 firmware aborts in the decoder, measured
   under emulation; older Reach firmware corrupts silently" — not "Reach is
   hacked," and not "Emlid fixed it."
-- **Say plainly what this isn't.** No mass-market camera drone (DJI, Skydio,
-  the thing most of the room pictures when they hear "drone") runs RTKLIB —
-  different stack, and where they do RTK it's on-chip in the receiver
-  silicon, a different code path this bug never touches. That's a permanent
-  limit, not a hedge.
-- **Say plainly what it is instead.** RTKLIB is the de-facto open engine
-  behind a lot of unglamorous real RTK infrastructure that gets forked into
-  closed firmware without ever using the name — precision-ag autosteer,
-  survey/construction stakeout, marine autopilots, RTK mapping drones via
-  Reach. Blast radius is a property of *where in the trust chain* you inject
+- **Say plainly what this isn't.** I found no evidence that mass-market camera
+  drones (DJI, Skydio, the thing most of the room pictures when they hear
+  "drone") run RTKLIB. Where they do RTK it appears to be on-chip in the
+  receiver silicon, a different code path from this bug. Don't stretch the
+  finding to them.
+- **Say plainly what it is instead.** Name only the users measured here:
+  Emlid Reach (RTK mapping drones, survey), demo5 and the official Windows
+  tools, and Debian's package. How far RTKLIB spreads into closed firmware
+  beyond that is *not* established. The fork-network analysis that tried to
+  answer it was retracted (`docs/HANDOFF.md`), so don't imply breadth from
+  it. Blast radius is a property of *where in the trust chain* you inject
   — a shared NTRIP mountpoint or CORS caster is fleet-wide; a single device's
   correction link is one target. Not the drone in the room's head. Not
   nothing, either.
@@ -672,7 +675,7 @@ raw text is enough).
 
 ## 9. The vertical negative, and the defence (3 min)
 
-- The false position is wrong in three axes. About a third of the error is
+- The false position is wrong in three axes. Of the 1.80 m error, 1.12 m is
   height: the GPS told the aircraft it was 1.12 m lower than it was.
 - **It moved 4 cm.** It ignored the height lie almost entirely.
 - Why: the autopilot has a *second opinion* about altitude — a barometer, which
@@ -704,8 +707,9 @@ The section that separates this from a bug writeup. Tell it as failures.
   artifact of a truncated crawl. Withdrawn in writing.
 - **And one I got wrong in this very talk's research:** I predicted Linux builds
   would abort. They don't.
-- **The rule that caught all of them:** run the control. Four times something
-  looked exactly like an attack effect and wasn't.
+- **The rule that caught the first three:** run the control. Three times
+  something looked exactly like an attack effect and wasn't. The other two were
+  caught by re-checking a claim against the data.
 
 *Any test where you cannot switch the attack off is not a test.*
 
@@ -761,7 +765,8 @@ long as you want to stand in front of it.
 
 *"It never said anything was wrong. It doesn't have a way to say it. A machine
 that is confidently wrong is more dangerous than one that knows it's broken —
-and we built an entire industry on a broadcast nobody signs."*
+and in every setup I measured, that machine is trusting a broadcast nobody
+signs."*
 
 ---
 
@@ -818,9 +823,9 @@ and we built an entire industry on a broadcast nobody signs."*
 | Question | Answer |
 |---|---|
 | "Isn't this just a crash?" | Not on most builds measured — Windows official, demo5, Debian, Reach Plus, M2/RS2 before v29.0. Show the exit-0 evidence. Current M2/RS2 firmware does abort: that's §5b. Then turn it round: the crash is the outcome you'd *want*, because the vehicle notices. Silence is the failure nothing is built to catch. |
-| "Surely a crash mid-flight is worse than 2 m of error?" | Flown both. Crash: EKF failsafe in 4.0 s, auto-LAND, on the ground in 33 s at 0.5 m/s, 4 errors logged. Corruption: zero errors, RTK FIXED throughout, flew the leg and reported arrival 1.4 m off. Then §5b: the crash is worse in a different way — it's a forced landing on the attacker's schedule. |
-| "So just compile it with `_FORTIFY_SOURCE`?" | No — that's §5b. You'd be trading a silent 2 m error for a forced landing within ~10 m of wherever the attacker chose. Both are attacks. The fix is the five-line clamp. |
-| "How precisely can you place the forced landing?" | 10.13 m drift measured, one run, 15 m hover, **zero wind** — a floor, not a bound. Enough for a lake, not for a lane of traffic. Don't let it be quoted as ±10 m. |
+| "Surely a crash mid-flight is worse than 2 m of error?" | Flown both. Crash: EKF failsafe 4.0 s after GPS loss (~8 s after the packet), auto-LAND, on the ground 33 s after GPS loss (~37 s after the packet) at 0.5 m/s, 4 errors logged. Corruption: zero errors, RTK FIXED throughout, flew the leg and reported arrival 1.4 m off. Then §5b: the crash is worse in a different way — it's a forced landing on the attacker's schedule. |
+| "So just compile it with `_FORTIFY_SOURCE`?" | First, it has to be level 2 or higher: level 1 still corrupts silently (measured 2026-11-16). And then no — that's §5b. You'd be trading a silent 2 m error for a forced landing about 10 m (in still air) from wherever the attacker chose. Both are attacks. The fix is the five-line clamp. |
+| "How precisely can you place the forced landing?" | 10.1 m and 10.8 m drift measured in two runs (2026-07-31, 2026-11-16), 15 m hover, **zero wind** — a floor, not a bound. Enough for a lake, not for a lane of traffic. Don't let it be quoted as ±10 m. |
 | "2 metres is nothing." | Nobody buys RTK to be within 2 m. It destroys the product's entire value while reporting maximum confidence. |
 | "Did you pick a lucky length?" | Yes — originally. That's §4. The demo now runs the rung whose error is bounded by one quantum anywhere: 2 m for about a third of the Earth, 4 m at most. |
 | "Who actually runs RTKLIB?" | Emlid Reach, demo5 users, Debian's package on 12 architectures, RTKNAVI operators. §5 and §6. |
