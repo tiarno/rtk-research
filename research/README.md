@@ -854,6 +854,44 @@ the simulator, not the aircraft.
 commanded leg after flying 10.24 m of 29.93 m, which is the failsafe taking the
 vehicle away from the waypoint, not an attacker walking it off course.
 
+#### Packet to touchdown: three four-second steps, then the descent
+
+Re-run 2026-11-16 on Linux Mint (same command, RTKLIB `180043e`, ArduCopter
+4.7.0 SITL) and recorded through `demo_view.py` as
+`stage-fallback-fortified.jsonl`. The dataflash log reproduces the table above
+almost exactly: GPS `Status` → 0 at 87.54 s, `MODE LAND (rsn 6)` at 91.54 s,
+`SIM Hit ground` at 120.63 s. The new information is what happens *between*
+LAND and the ground, which the table above does not show: after entering LAND
+the aircraft **holds altitude for another four seconds** before it descends.
+That is designed behaviour, not a harness artefact:
+
+| step | T from the packet | source |
+|---|---|---|
+| last NMEA sentence (RTKLIB aborts) | −0.3 s | recording; the phase line in `flight.log` trails the relay release slightly |
+| GPS declared lost, `Status` → 0 | +4.0 s | `GPS_TIMEOUT_MS 4000u`, `libraries/AP_GPS/AP_GPS.cpp:74`, applied at `:901` |
+| EKF failsafe → LAND | +8.0 s | measured, 4.0 s after GPS loss (no single constant identified for this step) |
+| descent begins | +12.4 s | `set_mode_land_with_pause()` → `LAND_WITH_DELAY_MS 4000` (`ArduCopter/config.h:328`, `mode_land.cpp:211`), plus ~0.4 s for the climb-rate demand to ramp |
+| fast descent ~1.5 m/s to ~10 m, then 0.5 m/s | +12.4 → +16.5 s, then onward | 0.5 m/s is `LAND_SPD_MS_DEFAULT` (`config.h:322`); the ~10 m knee is observed in `CTUN`, its parameter not identified |
+| `SIM Hit ground at 0.500 m/s` | +37.1 s | dataflash `MSG` |
+
+The pause is visible directly in `CTUN`: `DCRt` (demanded climb rate) is 0.00
+from 91.54 s to 95.5 s and first goes negative at 96.0 s. `ekf_check.cpp:205`
+and `:211` are the EKF failsafe's two calls into `set_mode_land_with_pause`.
+
+The "T from the packet" column puts the dataflash log on the recording's clock
+with an offset of 83.5 s, derived by matching the start of the descent in both.
+It is not a shared timestamp. The recording's own touchdown (agl < 0.3 m at
+T+36.3 s) agrees to within a second.
+
+Two things follow for the talk:
+
+- **Do not say "it drops the moment the packet lands."** For twelve seconds
+  nothing visible happens. Then it comes down wherever it is. The pause exists
+  so a pilot can take over; an autonomous flight has no pilot, and with no
+  position there is nothing to hand back.
+- **The 4.0 s "GPS loss to failsafe" above is not "packet to failsafe".** That
+  is 8.0 s, because the GPS driver itself waits 4 s before declaring the loss.
+
 #### Unfortified control: nothing happens at all
 
 Same injection, same profile, same aircraft:
@@ -1692,10 +1730,10 @@ Read these before quoting anything above.
   vehicle would behave differently again. The *direction* of the result — an
   event the vehicle can act on, versus none — is the claim; the seconds are
   illustrative. The crash-loop behaviour on restart is reasoned, not measured.
-- **The forced-landing dispersion is one sample.** 10.13 m, from a 15 m hover,
-  in **zero wind**, on a vehicle that was nearly stationary when the failsafe
-  fired. It is a floor and it is not a distribution: no repeats, no wind sweep,
-  no altitude sweep. Say "about 10 m in the one run measured, and more in any
+- **The forced-landing dispersion is two samples.** 10.13 m (2026-07-31, WSL)
+  and 10.76 m (2026-11-16, Linux Mint), both from a 15 m hover, in **zero
+  wind**, on a vehicle that was nearly stationary when the failsafe fired. It
+  is a floor and it is not a distribution: no wind sweep, no altitude sweep. Say "about 10 m in the one run measured, and more in any
   real condition" — not "±10 m", which implies a bound that has not been
   established.
 - **Fortification is not a fix and must not be reported as one.** It exchanges
