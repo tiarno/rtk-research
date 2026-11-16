@@ -4,9 +4,16 @@ Research on trust boundaries in RTK/GNSS positioning: *where does a
 GPS-dependent system begin trusting location, how can that trust be
 manipulated, and what physical or security decision follows?*
 
-No output is committed to as of 2026-07-31 — a talk and an article are both
-drafted, neither is scheduled, and nothing here is time-critical. See
-[docs/HANDOFF.md](docs/HANDOFF.md#where-this-is-going).
+**Status, 2026-11-16.** The article is published:
+[The GPS That Was Certain, and Wrong](https://reachtim.com/articles/gps-certain-and-wrong.html).
+The fix is filed upstream as
+[tomojitakasu/RTKLIB#801](https://github.com/tomojitakasu/RTKLIB/pull/801),
+which clamps the descriptor lengths in `decode_type1033`, `1007` and `1008`.
+It is open with no maintainer response, as is the original report
+[#799](https://github.com/tomojitakasu/RTKLIB/issues/799). The 1033 bug is
+[CVE-2026-56786](https://nvd.nist.gov/vuln/detail/CVE-2026-56786); Debian's
+`rtklib` is unpatched in every release. The talk track was dropped on
+2026-08-31. See [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Current work
 
@@ -15,8 +22,9 @@ RTKLIB's RTCM3 type 1033 decoder. A single well-formed correction message,
 delivered through the real-time server, does one of two things depending on how
 the binary was built:
 
-- **fortified build** (glibc `_FORTIFY_SOURCE` actually reaching the compiler)
-  — the process aborts. Flown in the loop this is the **detectable** outcome
+- **fortified build** (glibc `_FORTIFY_SOURCE` at level 2 or higher actually
+  reaching the compiler; level 1 does not catch it and corrupts silently,
+  measured 2026-11-16) — the process aborts. Flown in the loop this is the **detectable** outcome
   (EKF failsafe 4 s after the packet, four errors logged) and a **second
   attack**: the aircraft cannot return home, so one packet sent at a moment of
   the attacker's choosing lands it ~10 m from wherever it was. Fortification is
@@ -46,8 +54,13 @@ content — a zeroing primitive, not an arbitrary write. The attacker chooses
 the *scale* of the error, not its value: the declared length selects how many
 low-order (least-significant-mantissa) bytes of the coordinate get zeroed, and
 each additional byte multiplies the quantum by 256 — 8 more zeroed bits, not
-one more decimal digit. One rung — `n1=211`, a 2 m quantum — puts the error
-under 2 m against **any** base station, with no knowledge of its coordinates.
+one more decimal digit. The quantum at a given rung depends only on the
+binary exponent of the coordinate, which rough location gives away: at
+`n1=211` it is 2 m for about a third of the Earth's surface (this test base
+included), 4 m for another third (|X| ≥ 2^22 m, e.g. Madrid, Lagos, Sydney),
+and 1 m or finer elsewhere, down to millimetres near 90°E/W. So the attacker
+needs the target's region, not its coordinates. Computed from geometry, not
+measured at real stations (see the 2026-11-16 HANDOFF entry).
 
 The source of the defect is also present unchanged in
 [`emlid/RTKLIB`](https://github.com/emlid/RTKLIB) branch `reach`, the fork
@@ -79,8 +92,8 @@ end-to-end.
 
 ## Documents
 
-- [docs/blog-1033-draft.md](docs/blog-1033-draft.md) — long-form article for a general audience, assuming no GNSS background. **Draft, unpublished**; its publication blockers are in an HTML comment at the top of the file
-- [docs/talk-outline.md](docs/talk-outline.md) — beat sheet, demo staging, RF delivery plan, and the hardware list. **Contingent** — no talk is committed to
+- [docs/blog-1033-draft.md](docs/blog-1033-draft.md) — the article's working draft, **superseded**: the published version lives in the `reachtim` site repo and [on the site](https://reachtim.com/articles/gps-certain-and-wrong.html), and includes the 2026-11-16 corrections this draft lacks
+- [docs/talk-outline.md](docs/talk-outline.md) — beat sheet, demo staging, RF delivery plan, and the hardware list. **Dropped** 2026-08-31; kept as a record
 - [docs/eli5.md](docs/eli5.md) — the whole thing in plain language, no GNSS background assumed
 - [docs/rtk-rtklib-research-notes.md](docs/rtk-rtklib-research-notes.md) — background research, prior art, and the four disclosed decoder bugs
 - [docs/rtklib-claude-code-briefing.md](docs/rtklib-claude-code-briefing.md) — original task breakdown
