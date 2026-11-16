@@ -25,7 +25,9 @@ those sections leaves the argument intact.
 **Thesis in one sentence:** a precision GNSS rover can be made to emit a
 position metres from truth, while reporting its highest confidence flag, using
 one well-formed correction message that nothing on the link is authorised to
-send — and every build anyone actually ships fails silently rather than loudly.
+send — and most builds measured fail silently rather than loudly. The
+exception is current Emlid M2/RS2 firmware (v29.0 onward, built July 2022),
+which aborts instead — and that is a second attack, not a safe column (§5b).
 
 **What the audience should leave able to say:** *centimetre positioning trusts
 an unauthenticated broadcast, and the failure is silent by default, not loud.*
@@ -113,7 +115,8 @@ Let it happen. Then start the talk. **Do not explain yet.**
   routine that adopts the base position into the baseline — with no validation.
   The post-processing path has a `norm()` guard. The real-time path does not.
 
-**Slide:** the 227-byte packet, whole, with the antenna-name field highlighted.
+**Slide:** the 237-byte packet (`n1=211`, measured from `gen_rtcm.py --len 211`),
+whole, with the antenna-name field highlighted.
 *This is the entire attack.*
 
 ## 4. The dial has four rungs (4 min)
@@ -126,8 +129,12 @@ This is where the talk earns trust by refusing an easy claim.
 - Show the measured table (210/211/212/213).
 - The 2.4 m figure this work started with came from the 512 m rung landing well
   against one base. Against another it gave 29 m and would be thrown away.
-- **The rung that matters is `n1=211`:** a 2 m quantum, so the error is bounded
-  under 2 m against *any* base station on Earth, knowing nothing about it.
+- **The rung that matters is `n1=211`:** it zeroes four bytes of ECEF X, so the
+  error is bounded by one quantum, and the quantum depends only on the binary
+  exponent of X: **2 m for about a third of the Earth's surface** (this demo's
+  base included), **4 m where |X| ≥ 2²² m** (Madrid, Lagos, Sydney), 1 m or
+  finer elsewhere. The attacker needs the target's *region*, not its
+  coordinates. Computed from geometry, not measured at real stations.
 - Say plainly: attacker picks the **scale**, not the value. Direction isn't
   chosen either — truncation always moves the coordinate toward zero, so the
   resulting shift is fixed by the base's own latitude and longitude.
@@ -148,21 +155,26 @@ The most transferable insight in the talk.
   ships RTKLIB 2.4.3 b34 for **12 architectures** — and the armhf build imports
   no `*_chk` either. On ARM. From a distribution whose policy is to enable it.
 - **Conclusion, stronger for having been surprised:** the abort is what you get
-  by compiling it yourself with the right flags. It is not what anybody ships.
+  by compiling it yourself with `_FORTIFY_SOURCE=2` or higher (level 1 still
+  corrupts silently). Of everything measured, **one** vendor line ships that
+  way: Emlid M2/RS2 firmware from v29.0 (built 2022-07-14) onward imports
+  `__strncpy_chk`; 2.24.2–28.4 do not. No length clamp was added, so it is a
+  build-flag change, not a fix. Say exactly that: what changed and when, never
+  why.
 - **Then invert it, and land §5 on this — with the table, not an argument.**
   The instinct in the room will be that the crash column is the bad one. Both
   columns are now flown, same aircraft, same profile, same `n1=211`, differing
   only in the build (measured 2026-07-31):
 
-  | | fortified (aborts) | unfortified (ships) |
+  | | fortified (aborts) | unfortified (most builds measured) |
   |---|---|---|
   | GPS status | RTK FIXED → **none**, 87.5 s | **RTK FIXED the whole flight** |
   | errors logged | 4 | **0** |
-  | failsafe | EKF variance → **auto LAND**, 4.0 s after the packet | **none** |
-  | outcome | on the ground in 33 s at 0.5 m/s | flew the leg, **reported arrival, 1.4 m from truth** |
+  | failsafe | EKF variance → **auto LAND**, 4.0 s after GPS loss (~8 s after the packet; ArduCopter then holds 4 s before descending) | **none** |
+  | outcome | on the ground 33 s after GPS loss (~37 s after the packet), 0.5 m/s | flew the leg, **reported arrival, 1.4 m from truth** |
 
-  **The build that crashes gives the vehicle something to act on. The build
-  everyone runs gives it a confident wrong answer and nothing to trigger on.**
+  **The build that crashes gives the vehicle something to act on. The silent
+  builds give it a confident wrong answer and nothing to trigger on.**
   - Scope it honestly if pressed: ArduCopter 4.7.0, EKF3, stock failsafe
     params, one airframe. The direction is the claim; the seconds are
     illustrative.
@@ -192,7 +204,7 @@ wrong lesson and someone will leave with it. Turn immediately:
 
 **The slide to end on — two weapons, no safe column:**
 
-| | unfortified (ships) | fortified (DIY) |
+| | unfortified (most builds measured) | fortified (current Emlid M2/RS2, or `_FORTIFY_SOURCE=2`) |
 |---|---|---|
 | effect | position error | forced landing |
 | precision | exact | ~10 m and up |
@@ -238,11 +250,19 @@ wrong lesson and someone will leave with it. Turn immediately:
   "Staging this live" below §8.
 - **Be precise about what's still a limit.** That's Reach Plus, an older
   model, firmware from 2019, run under emulation rather than physical
-  silicon. **Reach M2 and RS2+ — the models currently for sale — are not yet
-  checked**; their firmware isn't at the same predictable URLs. Say
-  "confirmed, statically and dynamically, for Reach Plus's shipped firmware
-  under emulation; source-only for the current line" — not "Reach is
-  hacked."
+  silicon.
+- **Updated 2026-11-16 — the current line, checked, and it comes out the
+  other way.** Emlid's firmware list gives the M2 release history; eleven
+  versions disassembled (`research/emlid-m2/m2-bisect.tsv`). **M2/RS2 2.24.2
+  to 28.4 (to 2022-03-10): plain `strncpy`, silent. v29.0 (built 2022-07-14)
+  onward: `__strncpy_chk`, 64-byte destination — the attack aborts.** No
+  length clamp in 33.1. The RS2 v33.1 daemon is byte-identical to the M2's.
+  The abort was run: v33.1 `reach-gnss-logger` under qemu survives a 64-byte
+  `rectype` and aborts (exit 134) at 65. **Not run:** the daemon that feeds
+  the flight controller, ArduPilot's reaction on real Reach hardware, and
+  RS2+ at all. Say "current M2/RS2 firmware aborts in the decoder, measured
+  under emulation; older Reach firmware corrupts silently" — not "Reach is
+  hacked," and not "Emlid fixed it."
 - **Say plainly what this isn't.** No mass-market camera drone (DJI, Skydio,
   the thing most of the room pictures when they hear "drone") runs RTKLIB —
   different stack, and where they do RTK it's on-chip in the receiver
@@ -321,7 +341,7 @@ That's a narrower, lower-priority gap than it was this morning.
 | 0 | `rtkrcv`/RTKNAVI on a laptop already owned + a cheap USB GPS dongle (VK-172, u-blox 7, ~$10) for genuine satellite lock | ~$10 | real unmodified RTKLIB, real sky, corruption on real (if non-embedded) hardware |
 | 1 | Raspberry Pi Zero 2 W (~$15) + microSD (~$8) + the same $10 dongle, running `apt install rtklib` | ~$35–50 | the one thing the qemu run didn't: corruption on **physical** ARM silicon, not emulated. Debian's generic package, not Reach's own binary — the qemu run already covered "Reach's own binary, dynamically" |
 | 1 + HITL | Tier 1 + the Pixhawk-class flight controller already on the hardware list below (~$200) | ~$235–250 | a real autopilot device physically consuming the corrupted position — no flight, no airframe needed |
-| 2 (existing) | Emlid Reach M2, ~$750–1,023 | ~$750–1,023 | the claim nothing else here can make: that the **currently-sold** M2/RS2+ firmware carries the bug — Reach Plus (free download + qemu) only settles this for that one, older product |
+| 2 (existing) | Emlid Reach M2, ~$750–1,023 | ~$750–1,023 | *Superseded 2026-11-16:* the M2/RS2 firmware question is settled from free downloads (v29.0+ fortified, aborts; see §6). Remaining job is only physical hardware and the autopilot's reaction |
 
 No real base station is needed at any tier — the malicious correction is
 synthetic (`gen_rtcm.py`, already built), exactly as it is in every other
@@ -393,7 +413,8 @@ without breaking anything.
 
 **Why the attack is radio-friendly:** it is *additive*. You are not jamming, not
 suppressing the real base, not rewriting its stream. You transmit one extra
-well-formed message into the gaps. 227 bytes — 0.24 s at 9600 bps. The
+well-formed message into the gaps. 237 bytes at `n1=211` — about 0.25 s at
+9600 bps. The
 legitimate link keeps working, which is exactly why nothing notices.
 
 **Persistence:** the real base re-sends 1005 every few seconds, which repairs the
@@ -510,11 +531,10 @@ for the `esp32-rtcm-injector` repo. Current reality made this tier
 financially out of reach for now — see `esp32-rtcm-injector`'s
 `docs/HANDOFF.md` for the full lineup and the pivot to validating against
 real (free) RTKLIB software instead, which is what §8's over-the-air proof
-above actually did. **Narrower job as of 2026-08-13:** a free firmware
-download already settled the fortified/unfortified question for Reach Plus
-(RS+/M+, see §6) — this tier's remaining job is confirming the same thing
-for **M2/RS2+ specifically**, the models currently sold, whose firmware
-wasn't found at a free/guessable URL.
+above actually did. **Superseded 2026-11-16:** free firmware downloads now
+settle the fortified/unfortified question for Reach Plus *and* M2/RS2 (§6).
+This tier would add only physical hardware and the autopilot's reaction to a
+real M2 abort; the "settles the question" rows below are kept as a record.
 
 | Item | Qty | ~Cost | Buys you |
 |---|---|---|---|
@@ -524,7 +544,10 @@ wasn't found at a free/guessable URL.
 | Multi-band GNSS antenna + ground plane | 1–2 | $80–150 | needed by both of the above |
 | USB-TTL serial adapters (CP2102/FT232) | 2 | $20 | tap the serial link |
 
-**Used Reach hardware — same claim, lower price, added 2026-08-13.** A used
+**Used Reach hardware — same claim, lower price, added 2026-08-13.**
+*Superseded 2026-11-16: the current-model firmware question is settled from
+free downloads (§6); a used unit would add only physical hardware and the
+autopilot's reaction. Kept as a record.* A used
 M2/RS2+ unit is still Emlid's own firmware lineage, so it makes the same
 "current-model, named commercial product" claim a new one would — cost is
 the only thing that changes. (Reach Plus itself doesn't need this treatment
@@ -692,11 +715,13 @@ The section that separates this from a bug writeup. Tell it as failures.
   they didn't chase is where the spill lands — they framed it as memory
   corruption and never mention the base coordinates; their PoC drives a field
   that can't reach them.
-- Issues open and unanswered since June 2026. Reporter offered to file for a
-  CVE; no reply. Release branch untouched since December 2020.
+- **CVE-2026-56786** (VulnCheck, 2026-06-25). Issue #799 open, no maintainer
+  response. Debian's tracker: `<no-dsa>`/`<postponed>`, every release
+  vulnerable. Release branch untouched since 2020-12-29.
 - **"Wait for the patch" is not advice on an unmaintained project.**
-- Show the fix: a five-line clamp. File the PR before the talk so the slide
-  reads *"here is the fix, filed, still unmerged."*
+- Show the fix: the clamp in `decode_type1033`, `1007` and `1008`, **filed as
+  PR #801** — the slide reads *"here is the fix, filed, still unmerged."*
+  Re-check #801's state the week of the talk.
 - For operators, in priority order:
   1. Set the base coordinate **manually** where you can — the attack needs the
      rover to take its base position from the stream. Concede the limit
@@ -742,7 +767,7 @@ and we built an entire industry on a broadcast nobody signs."*
 
 ## Pre-submission checklist
 
-- [ ] File the RTKLIB patch PR (§11 slide depends on it)
+- [x] File the RTKLIB patch PR (§11 slide depends on it) — PR #801, open
 - [x] `offsetof(sta_t,pos)` on ARM — **464 on all six ABIs checked** (x86-64,
       armhf, armel, arm64, riscv64, ppc64), so the payload transfers unchanged.
       `research/check_offsets.py`. Strengthens §4: `n1=211` is not an x86-64
@@ -792,17 +817,17 @@ and we built an entire industry on a broadcast nobody signs."*
 
 | Question | Answer |
 |---|---|
-| "Isn't this just a crash?" | Not on any build anyone ships. Show the exit-0 evidence. Then turn it round: the crash is the outcome you'd *want*, because the vehicle notices. Silence is the failure nothing is built to catch. |
+| "Isn't this just a crash?" | Not on most builds measured — Windows official, demo5, Debian, Reach Plus, M2/RS2 before v29.0. Show the exit-0 evidence. Current M2/RS2 firmware does abort: that's §5b. Then turn it round: the crash is the outcome you'd *want*, because the vehicle notices. Silence is the failure nothing is built to catch. |
 | "Surely a crash mid-flight is worse than 2 m of error?" | Flown both. Crash: EKF failsafe in 4.0 s, auto-LAND, on the ground in 33 s at 0.5 m/s, 4 errors logged. Corruption: zero errors, RTK FIXED throughout, flew the leg and reported arrival 1.4 m off. Then §5b: the crash is worse in a different way — it's a forced landing on the attacker's schedule. |
 | "So just compile it with `_FORTIFY_SOURCE`?" | No — that's §5b. You'd be trading a silent 2 m error for a forced landing within ~10 m of wherever the attacker chose. Both are attacks. The fix is the five-line clamp. |
 | "How precisely can you place the forced landing?" | 10.13 m drift measured, one run, 15 m hover, **zero wind** — a floor, not a bound. Enough for a lake, not for a lane of traffic. Don't let it be quoted as ±10 m. |
 | "2 metres is nothing." | Nobody buys RTK to be within 2 m. It destroys the product's entire value while reporting maximum confidence. |
-| "Did you pick a lucky length?" | Yes — originally. That's §4. The demo now runs the rung that's bounded against any base. |
+| "Did you pick a lucky length?" | Yes — originally. That's §4. The demo now runs the rung whose error is bounded by one quantum anywhere: 2 m for about a third of the Earth, 4 m at most. |
 | "Who actually runs RTKLIB?" | Emlid Reach, demo5 users, Debian's package on 12 architectures, RTKNAVI operators. §5 and §6. |
 | "Real drones use an F9P, not RTKLIB." | Correct, and worth conceding. The F9P does RTK on-chip. Reach is the counter-example, and ArduPilot documents it. |
 | "Isn't that a niche configuration?" | No. It's not the compiled default, but of the seven example configs RTKLIB ships, the only one set up for real-time RTK is the only one that enables it. Post-processing and single-point modes have no stream to take a base position from. |
 | "Wouldn't it show up in the logs?" | No. Max verbosity logs 31 characters of attacker-chosen text and never the length; the coordinate adoption isn't traced at all. |
-| "Did you test real hardware?" | Updated 2026-08-13, later, again. Real radios: two Heltec V3s sent the actual attack over real LoRa RF into RTKLIB's own unmodified decoder. Real firmware, statically: Reach Plus's shipped firmware, free download, unfortified. Real firmware, **dynamically**: the actual Reach Plus `rtkrcv` binary, run under `qemu-aarch64-static` against the real config and a real correction stream, its own console reporting the base position moving 1.473 m live. Still not done: M2/RS2+ (the current models), and physical ARM silicon rather than emulation. Four claims now, not three — real radios, real firmware read, real firmware run (emulated), and the two that are still open. Don't blur "run" and "run on physical hardware." |
+| "Did you test real hardware?" | Updated 2026-08-13, later, again. Real radios: two Heltec V3s sent the actual attack over real LoRa RF into RTKLIB's own unmodified decoder. Real firmware, statically: Reach Plus's shipped firmware, free download, unfortified. Real firmware, **dynamically**: the actual Reach Plus `rtkrcv` binary, run under `qemu-aarch64-static` against the real config and a real correction stream, its own console reporting the base position moving 1.473 m live. Current M2/RS2 firmware, read and run (logger, under qemu): v29.0+ aborts rather than corrupts. Still not done: RS2+, the M2 daemon that feeds the autopilot, and physical ARM silicon rather than emulation. Four claims now, not three — real radios, real firmware read, real firmware run (emulated), and the two that are still open. Don't blur "run" and "run on physical hardware." |
 | "If you added the Pi + Pixhawk tier (§6b), doesn't that prove a real device is vulnerable?" | The dynamic case it was meant to prove is already proven — Reach Plus's own binary, run live via `qemu-aarch64-static`, see above — so this tier's remaining job shrank to one specific thing: physical ARM silicon instead of emulation. It still doesn't touch M2/RS2+. Emulation is a real gap from physical hardware, but a much smaller one than "never executed" — the instructions that ran were the actual shipped binary's, not a recompilation. Don't undersell it as "just a Pi would prove it for real" when what's missing is narrower than that now. |
 | "Did you transmit?" | For the stage demo: conducted only, into a shielded enclosure, never radiated. The bench validation that proved the LoRa mechanism works at all (§8) was low-power open-air at ~1 m, 2 dBm — say so if asked specifically about that, don't let "conducted only" cover testing it didn't apply to yet. |
 | "Is this a 0-day?" | No. Public since June 2026. What's new is where the spill lands and which builds fail silently. |
