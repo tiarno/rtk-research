@@ -4,6 +4,10 @@
 
 ## 2026-11-16: external review absorbed, article live, repo public, PR widened
 
+The superseded `docs/blog-1033-draft.md` was deleted; the published article on
+reachtim.com (source in the `reachtim` repo) is the only copy. The draft is in
+git history before this commit.
+
 First session since the Windows-to-Linux migration (Linux Mint, no WSL). An
 outside review of the published article prompted a fact-check against this
 repo, NVD, Debian and the source, and a round of fixes.
@@ -188,7 +192,7 @@ is dropped entirely.** Everything under it in this file and in
 **The new target: file the RTKLIB patch PR, then publish the blog article.**
 Both were already most of the way there — the fix is written and verified
 (`research/check_clamp.sh`), the blog is drafted
-([blog-1033-draft.md](blog-1033-draft.md)) — this session's job was
+(`blog-1033-draft.md`, since deleted) — this session's job was
 re-confirming state, not new research.
 
 **PR readiness, checked this session:**
@@ -864,7 +868,7 @@ and neither is committed to:
   [talk-outline.md](talk-outline.md); treat that document as *contingent*, not
   as a plan of record.
 - **A long-form article for a general audience**, drafted at
-  [blog-1033-draft.md](blog-1033-draft.md). Complete and readable, **not
+  `blog-1033-draft.md` (deleted 2026-11-16). Complete and readable, **not
   published**, with its three publication blockers listed in an HTML comment at
   the top of the file. It stands alone and does not depend on the talk
   happening.

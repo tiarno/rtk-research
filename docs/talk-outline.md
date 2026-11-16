@@ -4,7 +4,7 @@
 > committed to — no CFP submitted, no venue, no deadline. This document is kept
 > current because the material is ready and the outline is cheap to maintain,
 > not because a talk is being prepared. The other possible output is the
-> long-form article at [blog-1033-draft.md](blog-1033-draft.md), which stands
+> long-form article, published as [The GPS That Was Certain, and Wrong](https://reachtim.com/articles/gps-certain-and-wrong.html), which stands
 > alone and does not need the talk to happen.
 >
 > The checklist near the end assumes an active submission. **Ignore it unless a

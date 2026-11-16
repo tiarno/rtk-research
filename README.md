@@ -92,7 +92,6 @@ end-to-end.
 
 ## Documents
 
-- [docs/blog-1033-draft.md](docs/blog-1033-draft.md) — the article's working draft, **superseded**: the published version lives in the `reachtim` site repo and [on the site](https://reachtim.com/articles/gps-certain-and-wrong.html), and includes the 2026-11-16 corrections this draft lacks
 - [docs/talk-outline.md](docs/talk-outline.md) — beat sheet, demo staging, RF delivery plan, and the hardware list. **Dropped** 2026-08-31; kept as a record
 - [docs/eli5.md](docs/eli5.md) — the whole thing in plain language, no GNSS background assumed
 - [docs/rtk-rtklib-research-notes.md](docs/rtk-rtklib-research-notes.md) — background research, prior art, and the four disclosed decoder bugs
