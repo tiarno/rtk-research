@@ -2,6 +2,47 @@
 
 **Session date:** 2026-11-16
 
+## Start here (state at end of 2026-11-16)
+
+**Where things stand:**
+
+- Article live: reachtim.com/articles/gps-certain-and-wrong.html (source:
+  `~/work/reachtim/content/articles/gps-certain-and-wrong.md`; deploy with
+  `tools/deploy.sh` there). Last change: Part 14 M2 qemu run (`35bd9ca`).
+- This repo is public (`tiarno/rtk-research`), pushed at `60adef7`.
+- Upstream: PR #801 (1033 + 1007/1008 clamps) and issue #799 open, no
+  maintainer response. CVE-2026-56786. Debian unpatched.
+
+**Emlid, settled today:**
+
+| Firmware | 1033 behaviour | How known |
+|---|---|---|
+| Reach Plus v2.18.1 (2019) | silent shift | run under qemu (`rtkrcv`) |
+| Reach RS (Edison) up to 28.4 | silent (no `*_chk`) | read |
+| M2/RS2 2.24.2 to 28.4 | silent (plain `strncpy`) | read |
+| M2/RS2 **v29.0+** (2022-07-14 on, all current units) | **abort** past 64 bytes | read, then run under qemu in `reach-gnss-logger` v33.1 |
+
+**Tooling:** `research/emlid-m2/` (bisect checker, qemu trial harness,
+protobuf descriptor dumper, bisect table). Heavy files live outside the repo
+in `$RTK_BISECT` (default `~/.cache/rtk-bisect`: ARM binutils, qemu-arm-static,
+extracted M2 v33.1 rootfs). Re-run a trial: start the firmware `redis-server`
+under qemu on 1500, then `research/emlid-m2/trial.sh <stream.rtcm3> <port>`.
+Streams come from `research/gen_rtcm.py --len N`.
+
+**Open, in rough priority:**
+
+1. Run `reach-ublox-daemon` itself (the process feeding the flight
+   controller). Needs a fake u-blox on `--rcv-path` plus Emlid's Redis/protobuf
+   RPC; hours of work.
+2. What ArduPilot does when that daemon dies. The upstream-abort SITL case
+   is already measured (`research/loop_demo.sh`, research/README "What the
+   abort does to the aircraft"); the M2-specific path is not.
+3. Current Reach Plus firmware: not on Emlid's list under `ReachPlus`,
+   `ReachRSPlus`, `ReachMPlus`.
+4. `str2str`/`convbin` on the Reach Plus image; RS2 history not bisected
+   separately (33.1 daemon is byte-identical to M2).
+5. Optional second PR against `rtklib_2.4.3` carrying all three clamps.
+
 ## 2026-11-16 (evening): M2 v33.1 abort run under qemu
 
 - `reach-ublox-daemon` needs a u-blox chip, GPIO and Emlid's protobuf RPC
