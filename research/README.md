@@ -446,7 +446,9 @@ now including one obtained the way an actual customer would obtain it.
   firmware filenames; none were found by either search or a handful of
   targeted guesses off the naming pattern that worked. Guessing further
   starts to look like scanning a vendor's bucket rather than following a
-  lead, so that stopped rather than continued. Unresolved, not ruled out.
+  lead, so that stopped rather than continued. *Resolved 2026-11-16 through
+  Emlid's own firmware list; see "Reach M2 and RS2: fortified from v29.0"
+  below.*
 - **v2.18.1, dated 2019-06-27.** Whether a current Reach Plus firmware build
   differs is unchecked.
 - ~~Static, not dynamic~~ — **resolved same day, see "Dynamic confirmation"
@@ -632,6 +634,36 @@ package — actually does.
 That also supplies the first real ARM binary in this work, which weakens the
 case for the qemu offset exercise: ARM builds exist, ship, and are unfortified.
 
+### Reach M2 and RS2: fortified from v29.0
+
+Measured 2026-11-16. Emlid's Linux Flash Tool 2.1 (unpacked, never run) has
+its firmware-list endpoint built in:
+`https://update-provider.cloud.emlid.com/api/client/v1/firmware-list?device_type=ReachM2&release_channel=stable&latest=false`.
+It returns the M2 history v2.22.1 to v33.1. Images for 2.24.2 and 28.1 to
+33.1 download without auth; older ones return 403. Each image was carved
+without root (fdisk, dd, debugfs) and every ELF carrying the `rtcm3 1033`
+trace string was disassembled with Ubuntu's ARM binutils; the 1033 decoder
+shows up as a cluster of five `strncpy`-family calls within 320 bytes.
+
+| M2 firmware | Build date | 1033 copies in `reach-ublox-daemon` |
+|---|---|---|
+| 2.24.2 | 2020-11-24 | plain `strncpy` (silent) |
+| 28.1, 28.2, 28.3, 28.4 | 2021-12-20 to 2022-03-10 | plain (silent) |
+| **29.0** | **2022-07-14** | **`__strncpy_chk` (abort)** |
+| 29.1, 30.0, 30.1, 31.0-r3, 33.1-r1 | 2022-07-26 to 2026-02-18 | `__strncpy_chk` |
+
+28.4 and 29.0 are adjacent releases, so the boundary is exact. In 33.1 the
+destination size passed to `__strncpy_chk` is 64 and there is no clamp on
+the declared length, so the n1 >= 208 needed to reach `pos` aborts. The
+change reads as a toolchain or build-flag switch, not a fix. 1007/1008 show
+the same pattern in 33.1. The RS2 v33.1 `reach-ublox-daemon` is
+byte-identical to the M2's; RS2 was not bisected separately. The original
+Reach RS (Edison, x86) line ends at 28.4 and imports no `*_chk`.
+
+Not done: the M2 binary was read, not run, so the abort and what ArduPilot
+does when `reach-ublox-daemon` dies are unmeasured. Current Reach Plus
+firmware is still unchecked; no Reach Plus device name returned a list.
+
 ### The payload length transfers unchanged — measured, six ABIs
 
 Everything above was an argument about *fortification*. A separate question
@@ -687,9 +719,9 @@ out to be at guessable, unauthenticated, exact URLs that just weren't the
 ones tried. `reach-plus-v2.18.1.zip` is a live download at
 `files.emlid.com/images/`, found via a documentation cross-reference rather
 than the Flash Tool. See "The shipped firmware, not just the source," below,
-for the result: unfortified, same as everything else. **Still not settled:
-M2 and RS2+**, the currently-sold models — their firmware filenames weren't
-found, and this result doesn't transfer to them without checking.
+for the result: unfortified, same as everything else. **M2 and RS2 were
+settled 2026-11-16** and came out fortified from v29.0 on; see "Reach M2 and
+RS2: fortified from v29.0".
 
 ### Effect on the solution
 
@@ -1681,10 +1713,12 @@ Read these before quoting anything above.
   now been examined** — Reach Plus (RS+/M+) v2.18.1, 2019 — and it is
   unfortified: see "The shipped firmware, not just the source." The earlier
   expectation that Linux targets land in the *fortified* column is refuted
-  across the board now: Debian's armhf package, and this shipped ARM
-  firmware, both import no `*_chk` at all. **Still unmeasured: M2 and RS2+**,
-  the models currently sold, and whether current Reach Plus firmware differs
-  from this 2019 build. For those specifically, keep saying "the source is
+  for Debian's armhf package and this shipped ARM firmware, which import no
+  `*_chk` at all. **M2 and RS2 were checked 2026-11-16 and are the
+  exception:** fortified from v29.0 (2022-07-14) on, so current units abort
+  rather than corrupt; see "Reach M2 and RS2: fortified from v29.0".
+  Still unmeasured: whether current Reach Plus firmware differs from this
+  2019 build. For those specifically, keep saying "the source is
   affected," not "the product behaves this way" — that sentence has now
   graduated to "confirmed" for exactly one product and firmware version, not
   for the Reach line as a whole.

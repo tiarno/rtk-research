@@ -38,12 +38,12 @@ the binary was built:
   turned all the way up, all an operator gets is one line showing a
   plausible-looking antenna descriptor.
 
-**Every build measured so far is in the second column**, which was not the
-expectation going in. Both Windows distributions (the official one and demo5)
+**Nearly every build measured is in the second column**, which was not the
+expectation going in. The exception is Emlid's current firmware (below). Both Windows distributions (the official one and demo5)
 are Embarcadero builds where the fortified `strncpy` has no equivalent to
 enable, and Debian's own `rtklib` package — version 2.4.3.b34, built for 12
-architectures — imports no `*_chk` at all, on ARM included. The abort is what
-you get by compiling it yourself with the right flags, not what anyone ships.
+architectures — imports no `*_chk` at all, on ARM included. Outside Emlid,
+the abort is what you get by compiling it yourself with the right flags.
 
 The mechanism: `rectype`, the text field that gets oversized, sits 208 bytes
 before `pos` in the struct (offset 256 vs. 464, fixed across every ABI
@@ -77,7 +77,18 @@ read:** `qemu-aarch64-static` (downloaded and unpacked with no root) ran
 that firmware's actual `rtkrcv` binary against its own real config and a
 real correction stream — its own console reported the base position moving
 1.473 m, live, message counts matching exactly, nothing in the error log.
-Reach M2 and RS2+, the currently-sold units, are still not checked. See
+**Reach M2 and RS2, checked 2026-11-16, came out the other way.** Emlid's
+firmware list (URL taken from its Linux Flash Tool) gives the full M2 release
+history; 2.24.2 and 28.1 through 33.1 download publicly. Disassembly of
+`reach-ublox-daemon` in eleven of them: **2.24.2 to 28.4 (to 2022-03-10)
+use plain `strncpy`, silent; v29.0 (built 2022-07-14) onward use
+`__strncpy_chk` with a 64-byte destination, so the attack aborts.** No
+length clamp was added (checked in 33.1), so this is a build-flag change,
+not a fix, and current units are the loud case. The RS2 v33.1 daemon is
+byte-identical to the M2's. The original Reach RS line ends at 28.4,
+unfortified. Read, not run: the M2 abort and its effect on ArduPilot are not
+measured. Current Reach Plus firmware is still unchecked (not on the list
+under any device name tried). See
 [research/README.md](research/README.md#the-shipped-firmware-not-just-the-source)
 and, for the dynamic run, "Dynamic confirmation: the shipped binary,
 running, live" in the same file.

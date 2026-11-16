@@ -2,6 +2,38 @@
 
 **Session date:** 2026-11-16
 
+## 2026-11-16 (later): Emlid fortified the 1033 copy in M2 firmware v29.0
+
+Bisected Reach M2 firmware for when the 1033 decoder moved from silent to
+abort. The first attempt was lost to a PC crash mid-bisect (scratchpad wiped
+on reboot); the checker was rebuilt from the session transcript into
+`~/.cache/rtk-bisect/` (`fwcheck.sh`, ARM binutils, `RESULTS.tsv`), outside
+both `/tmp` and this public repo.
+
+- **Result: 28.4 (2022-03-10) is the last plain-`strncpy` release; v29.0
+  (2022-07-14) is the first with `__strncpy_chk`.** Adjacent releases, so the
+  boundary is exact. Eleven images read: 2.24.2, 28.1-28.4 plain; 29.0, 29.1,
+  30.0, 30.1, 31.0-r3, 33.1-r1 fortified. Table and method in
+  research/README.md, "Reach M2 and RS2: fortified from v29.0".
+- **Not a fix.** No length clamp before the copy (checked in 33.1); dest size
+  64, the attack needs 208+, so current units abort. That makes the current
+  M2 the loud, attacker-timed-landing case. Read from disassembly only; the
+  abort and ArduPilot's reaction are unmeasured.
+- RS2 v33.1 daemon is byte-identical to the M2's; the RS2 history (40
+  releases) was not bisected separately.
+- Original Reach RS (Edison, x86): last release 28.4, no `*_chk` imports.
+- Reach Plus is not on the firmware list under `ReachPlus`, `ReachRSPlus`
+  or `ReachMPlus`; whether its current firmware differs from the 2019 build
+  is still open.
+- M2 images older than 28.1 (except 2.24.2) return 403.
+
+Updated: root README, research/README.md (new section plus three stale
+"M2/RS2+ unchecked" passages), and the article (Parts 10, 12, 14, 15:
+"every build is silent" became "nearly every", with the Emlid exception).
+
+**Open:** run the M2 33.1 `reach-ublox-daemon` under qemu with a long 1033
+to confirm the abort; find current Reach Plus firmware.
+
 ## 2026-11-16: external review absorbed, article live, repo public, PR widened
 
 The superseded `docs/blog-1033-draft.md` was deleted; the published article on
@@ -84,8 +116,8 @@ older commits are visible.
 
 - The `rtklib_2.4.3` second PR is still optional and unfiled. It should now
   carry all three decoders' clamps.
-- Reach M2/RS2+ firmware and `str2str`/`convbin` on the Reach image remain
-  unchecked.
+- `str2str`/`convbin` on the Reach image remain unchecked. (M2/RS2: see the
+  entry above.)
 - To run anything here again: there is no RTKLIB checkout on this machine
   (the WSL `~/RTKLIB` is gone). Clone `rtklib_2.4.3` and check out `180043e`.
   The scripts' WSL paths and `.claude/settings.json` are stale.
