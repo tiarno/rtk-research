@@ -12,8 +12,11 @@ which clamps the descriptor lengths in `decode_type1033`, `1007` and `1008`.
 It is open with no maintainer response, as is the original report
 [#799](https://github.com/tomojitakasu/RTKLIB/issues/799). The 1033 bug is
 [CVE-2026-56786](https://nvd.nist.gov/vuln/detail/CVE-2026-56786); Debian's
-`rtklib` is unpatched in every release. The talk track was dropped on
-2026-08-31. See [docs/HANDOFF.md](docs/HANDOFF.md).
+`rtklib` is unpatched in every release. The talk track, dropped on
+2026-08-31, was reopened on 2026-11-16: a solo CFP submission to
+CackalackyCon (May 2027) with a software-only demo. See
+[docs/talk-outline.md](docs/talk-outline.md) and
+[docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Current work
 

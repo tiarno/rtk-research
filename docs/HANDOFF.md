@@ -9,9 +9,14 @@
 - Article live: reachtim.com/articles/gps-certain-and-wrong.html (source:
   `~/work/reachtim/content/articles/gps-certain-and-wrong.md`; deploy with
   `tools/deploy.sh` there). Last change: Part 14 M2 qemu run (`35bd9ca`).
-- This repo is public (`tiarno/rtk-research`), pushed at `60adef7`.
-- Upstream: PR #801 (1033 + 1007/1008 clamps) and issue #799 open, no
-  maintainer response. CVE-2026-56786. Debian unpatched.
+- This repo is public (`tiarno/rtk-research`).
+- Upstream: PR #801 (1033 + 1007/1008 clamps: 5 code lines in 1033, 8 in
+  all) and issue #799 open, no maintainer response. CVE-2026-56786. Debian
+  unpatched.
+- **Talk reopened (late 2026-11-16):** solo CFP to CackalackyCon, May 2027,
+  software-only demo. Outline audited and fixed; its banner has the plan.
+  **Next:** check the CFP window and slot length, then draft the abstract
+  and run `claim-audit` on it.
 
 **Emlid, settled today:**
 
@@ -42,6 +47,32 @@ Streams come from `research/gen_rtcm.py --len N`.
 4. `str2str`/`convbin` on the Reach Plus image; RS2 history not bisected
    separately (33.1 daemon is byte-identical to M2).
 5. Optional second PR against `rtklib_2.4.3` carrying all three clamps.
+
+## 2026-11-16 (late): SITL rig on Mint, split view, 4-4-4 timeline, outline audit
+
+- **Rig rebuilt on Linux Mint** (the WSL one is gone): `~/RTKLIB` at
+  `rtklib_2.4.3` `180043e`; `~/apsitl/arducopter` = prebuilt ArduCopter
+  4.7.0 SITL from firmware.ardupilot.org; pymavlink 2.4.50 in the pyenv
+  Python. **Gotcha:** `loop_demo.sh` also needs
+  `~/ardupilot/Tools/autotest/default_params/copter.parm` (fetched alone
+  from tag `Copter-4.7.0`); without it arming fails with "3D Accel
+  calibration needed" and the run reports a meaningless 3375 m miss.
+- **Fortified run recorded** (`FORTIFY=1 HOLD=1 ./loop_demo.sh 211`, viewer
+  recording): `research/stage-fallback-fortified.jsonl`. Reproduces July's
+  log times (GPS loss 87.5 s, LAND 91.5 s, touchdown 120.6 s); dispersion
+  10.76 m, a second sample beside July's 10.13 m.
+- **Split view:** `research/demo_split.py` + `.html` replay the silent and
+  fortified recordings on one clock, anchored on phase 2 (not
+  `injected > 0`, which stays 0 in an aborted run because the relay's last
+  count is never parsed). Checked in headless Chrome over CDP at T+8, +48,
+  +100, +141 s.
+- **The hover gap is ArduCopter's 4 s land pause.** Packet → GPS loss 4 s
+  (`GPS_TIMEOUT_MS`) → EKF failsafe 4 s (measured) → descent after
+  `LAND_WITH_DELAY_MS` 4 s. Written up in research/README "Packet to
+  touchdown".
+- **Outline claim-audited** and fixed (`6a09feb`, `531affb`, `d1f5dae`);
+  banner updated for the CFP (`3b4ffb6`). Stale "nobody ships" wording in
+  research/README and the top README status fixed alongside this entry.
 
 ## 2026-11-16 (evening): M2 v33.1 abort run under qemu
 

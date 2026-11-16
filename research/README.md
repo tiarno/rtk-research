@@ -25,7 +25,7 @@ this turns out to be the most important fact here:
 | build | outcome |
 |---|---|
 | glibc `_FORTIFY_SOURCE` active (`-O1`+ and the flag actually reaching the compiler) | the fortified `strncpy` detects the overflow and **aborts the process** — a remote DoS, repeatable for as long as the stream continues. On a vehicle this is a **second attack, not a mitigation**: the aircraft loses GPS, cannot return home, and lands within ~10 m of wherever the attacker chose to send the packet |
-| unfortified — **every build measured so far**: both Windows distributions, Debian's own `rtklib` package on ARM, and Emlid's own shipped Reach Plus (RS+/M+) firmware | the write goes through **silently** — position corruption |
+| unfortified — **nearly every build measured**: both Windows distributions, Debian's own `rtklib` package on ARM, Emlid's own shipped Reach Plus (RS+/M+) firmware, and Emlid M2/RS2 up to 28.4. The exception is M2/RS2 v29.0 onward (built 2022-07-14), which is fortified and aborts (top-level README) | the write goes through **silently** — position corruption |
 
 In the unfortified case the interesting band is a small one. A shift of
 ~0.4-2.5 m leaves RTKLIB reporting **Q=1 (RTK fixed)** — its highest quality
@@ -194,7 +194,7 @@ stream rather than entered by hand. That is **not** RTKLIB's compiled default:
 `options.c:503` initialises `antpostype_` to 0 (LLH). But it is what the
 shipped RTK example tells you to use.
 
-Of the six example configurations in the source tree, exactly one is set up for
+Of the seven example configurations in the source tree, exactly one is set up for
 real-time RTK against an RTCM3 stream — and it is also the only one that
 selects the vulnerable setting:
 
@@ -906,16 +906,19 @@ Same injection, same profile, same aircraft:
 
 That is the whole argument in one table, and it is the reverse of the intuitive
 reading of the two columns. The build that *aborts* gives the vehicle a
-detectable event and a policy to run. The build that ships gives it a confident
-wrong answer and nothing to trigger on.
+detectable event and a policy to run. The silent builds, nearly every one
+measured, give it a confident wrong answer and nothing to trigger on.
 
 Autonomy stacks are built for "the sensor went away" — it is a declared state
 with a failsafe attached, and here it fired in four seconds. Nothing is built
 for "the sensor is confidently wrong", because there is no signal to fire on:
 zero `ERR` records, zero mode changes, `Status=6` throughout.
 
-**So on detectability the hardened build wins outright, and it is the one nobody
-ships.** That is the finding. It is *not* a reason to call fortification a fix —
+**So on detectability the hardened build wins outright, and almost nothing
+measured ships that way.** (Written 2026-07-31 as "nobody ships it". The
+2026-11-16 M2/RS2 bisect found the one exception: Emlid firmware from v29.0,
+built 2022-07-14, is fortified. That is a build-flag change with no length
+clamp, not a fix.) That is the finding. It is *not* a reason to call fortification a fix —
 see the next section, which is the other half of this result.
 
 ### The abort is a second attack: an attacker-timed forced landing
@@ -966,7 +969,7 @@ What that buys an attacker who can see the target:
 The two build columns hand an attacker **different weapons**. Neither is the
 benign case:
 
-| | unfortified (ships) | fortified (compile it yourself) |
+| | unfortified (nearly every build measured) | fortified (current Emlid M2/RS2, or `_FORTIFY_SOURCE=2`) |
 |---|---|---|
 | effect | position error | forced landing |
 | precision | exact, chosen magnitude | ±10 m and up |
