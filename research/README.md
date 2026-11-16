@@ -660,9 +660,36 @@ the same pattern in 33.1. The RS2 v33.1 `reach-ublox-daemon` is
 byte-identical to the M2's; RS2 was not bisected separately. The original
 Reach RS (Edison, x86) line ends at 28.4 and imports no `*_chk`.
 
-Not done: the M2 binary was read, not run, so the abort and what ArduPilot
-does when `reach-ublox-daemon` dies are unmeasured. Current Reach Plus
-firmware is still unchecked; no Reach Plus device name returned a list.
+**Run, not just read (same day).** `reach-ublox-daemon` will not reach its
+correction path without a live u-blox chip, GPIO reset lines and Emlid's
+protobuf RPC over Redis. `reach-gnss-logger` from the same v33.1 image
+carries the same fortified 1033 copies and takes its input from a TCP
+stream, so it was run instead: `qemu-arm-static` (from the
+`qemu-user-static` .deb, unpacked, no root), the firmware's own
+`redis-server` on port 1500, and a `GNSSLogger.proto.StartLoggingRequest`
+(RINEX output, RTCM3 input, `tcpcli://localhost:<port>`) published on
+`gnss-logger-request`. The schema came from the descriptor embedded in the
+binary (`emlid-m2/protodesc.ts`). Each trial is a fresh process
+(`emlid-m2/trial.sh`), streams from `gen_rtcm.py`:
+
+| Stream | Outcome |
+|---|---|
+| benign 1005 + 1033 | runs to the 25 s timeout (exit 124), RINEX written |
+| 1033 `rectype` length 31 | same |
+| length 64 | same; the RINEX header's `REC # / TYPE` holds the attack's `AAAA…`, so the 1033 was decoded |
+| length **65** | `*** buffer overflow detected ***: terminated`, exit 134 |
+| length 208, 255 | same abort |
+
+The abort starts exactly one byte past the 64-byte field, which is the
+`__strncpy_chk` bound seen in the disassembly. Reproduced twice, once from
+the repo copies of the scripts.
+
+Still not done: the daemon itself, which is the process that feeds the
+flight controller, was read, not run; what ArduPilot does when it dies is
+unmeasured; whether a real unit ever routes base corrections into the
+logger is unknown. Current Reach Plus firmware is still unchecked; no Reach
+Plus device name returned a list. Scripts and the bisect table:
+[emlid-m2/](emlid-m2/).
 
 ### The payload length transfers unchanged — measured, six ABIs
 

@@ -2,6 +2,25 @@
 
 **Session date:** 2026-11-16
 
+## 2026-11-16 (evening): M2 v33.1 abort run under qemu
+
+- `reach-ublox-daemon` needs a u-blox chip, GPIO and Emlid's protobuf RPC
+  before it reads corrections, so it was not run. `reach-gnss-logger` (same
+  image, same fortified decoder) was: qemu-arm-static, firmware
+  `redis-server` on 1500, a `StartLoggingRequest` (RINEX out, RTCM3 in,
+  `tcpcli://localhost:<port>`) published on `gnss-logger-request`.
+- **Result:** `rectype` length 64 runs (and its `AAAA…` lands in the RINEX
+  `REC # / TYPE`); 65, 208, 255 abort with `buffer overflow detected`,
+  exit 134. Benign and length 31 run clean. Reproduced twice.
+- Scripts in `research/emlid-m2/` (`fwcheck.sh`, `trial.sh`, `serve.ts`,
+  `startlog.ts`, `protodesc.ts`, `m2-bisect.tsv`). Work dir
+  `$RTK_BISECT`, default `~/.cache/rtk-bisect` (qemu, rootfs, ARM binutils;
+  no firmware in the repo).
+- Gotcha: `pkill -f <pattern>` kills your own shell when the pattern is in
+  the command line; kill by PID from `/proc/<pid>/cmdline` instead.
+- **Open:** run the daemon itself (needs a fake u-blox); ArduPilot's reaction
+  to the daemon dying; current Reach Plus firmware.
+
 ## 2026-11-16 (later): Emlid fortified the 1033 copy in M2 firmware v29.0
 
 Bisected Reach M2 firmware for when the 1033 decoder moved from silent to
@@ -31,8 +50,7 @@ Updated: root README, research/README.md (new section plus three stale
 "M2/RS2+ unchecked" passages), and the article (Parts 10, 12, 14, 15:
 "every build is silent" became "nearly every", with the Emlid exception).
 
-**Open:** run the M2 33.1 `reach-ublox-daemon` under qemu with a long 1033
-to confirm the abort; find current Reach Plus firmware.
+**Open:** superseded by the evening entry above.
 
 ## 2026-11-16: external review absorbed, article live, repo public, PR widened
 

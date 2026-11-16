@@ -1,0 +1,12 @@
+version	build	reach-ublox-daemon 1033 copies
+2.24.2	2020-11-24	PLAIN strncpy (silent corruption)
+28.1	2021-12-20	PLAIN
+28.2	2022-02-16	PLAIN
+28.3	2022-02-25	PLAIN
+28.4	2022-03-10	PLAIN
+29.0	2022-07-14	__strncpy_chk (abort)  <-- first fortified
+29.1	2022-07-26	CHK
+30.0	2023-01-20	CHK
+30.1	2023-03-03	CHK
+31.0-r3	2023-08-01	CHK
+33.1-r1	2026-02-18	CHK

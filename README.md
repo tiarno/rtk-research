@@ -86,8 +86,11 @@ use plain `strncpy`, silent; v29.0 (built 2022-07-14) onward use
 length clamp was added (checked in 33.1), so this is a build-flag change,
 not a fix, and current units are the loud case. The RS2 v33.1 daemon is
 byte-identical to the M2's. The original Reach RS line ends at 28.4,
-unfortified. Read, not run: the M2 abort and its effect on ArduPilot are not
-measured. Current Reach Plus firmware is still unchecked (not on the list
+unfortified. **The abort was then run:** the v33.1 `reach-gnss-logger`, same
+decoder, under qemu with a TCP correction stream, survives a 64-byte
+`rectype` and aborts (`buffer overflow detected`, exit 134) at 65 and
+above. The daemon that feeds the flight controller was not run, and
+ArduPilot's reaction is not measured. Current Reach Plus firmware is still unchecked (not on the list
 under any device name tried). See
 [research/README.md](research/README.md#the-shipped-firmware-not-just-the-source)
 and, for the dynamic run, "Dynamic confirmation: the shipped binary,
