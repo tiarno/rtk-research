@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RTK split view</title>
+<style>
+  :root {
+    --bg:#0b0e13; --panel:#121721; --edge:#222b3a;
+    --text:#e6edf7; --muted:#7d8da5; --dim:#4a586e;
+    --truth:#ffb340; --gps:#4dd2ff;
+    --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+    --lineL:#c4b5fd; --lineR:#f9a8d4;
+  }
+  * { box-sizing:border-box; }
+  html, body { height:100%; margin:0; background:var(--bg); color:var(--text);
+    font-family:"Segoe UI", system-ui, -apple-system, sans-serif; overflow:hidden; }
+  body { display:flex; flex-direction:column; }
+  .num { font-variant-numeric:tabular-nums;
+         font-family:"Cascadia Mono", Consolas, ui-monospace, monospace; }
+
+  /* ---- shared clock: the packet is the only moment that matters ---- */
+  #clock { flex:0 0 auto; display:flex; justify-content:center; align-items:baseline;
+           gap:1rem; padding:0.35rem 1rem; background:var(--panel);
+           border-bottom:1px solid var(--edge); }
+  #clock .value { font-size:clamp(1.3rem, 2.4vw, 2.2rem); font-weight:800; }
+  #clock .value.hit { color:var(--bad); }
+  #clock .label { font-size:0.72rem; letter-spacing:0.16em; color:var(--muted);
+                  text-transform:uppercase; }
+
+  #sides { flex:1 1 auto; display:flex; gap:2px; background:var(--edge); min-height:0; }
+  .side { flex:1 1 0; display:flex; flex-direction:column; min-width:0;
+          background:var(--edge); gap:1px; }
+  .side .title { background:var(--panel); padding:0.45rem 1rem 0.4rem;
+                 border-top:3px solid var(--accent); }
+  .side .title b { font-size:clamp(1rem, 1.6vw, 1.45rem); }
+  .side .title div { font-size:0.8rem; color:var(--muted); margin-top:0.1rem; }
+
+  .cells { display:flex; gap:1px; flex:0 0 auto; }
+  .cell { background:var(--panel); padding:0.4rem 0.9rem; display:flex;
+          flex-direction:column; justify-content:center; min-width:0; }
+  .cell .label { font-size:0.66rem; letter-spacing:0.14em; color:var(--muted);
+                 text-transform:uppercase; white-space:nowrap; }
+  .cell .value { font-size:clamp(1.3rem, 2.5vw, 2.5rem); font-weight:800;
+                 line-height:1.05; white-space:nowrap; }
+  .cell .sub { font-size:0.72rem; color:var(--muted); margin-top:0.2rem;
+               white-space:nowrap; }
+  .badge { flex:1.3 1 0; }
+  .badge.good .value { color:var(--good); text-shadow:0 0 22px rgba(34,197,94,.45); }
+  .badge.warn .value { color:var(--warn); }
+  .badge.bad  .value { color:var(--bad); }
+  .gap, .alt { flex:1 1 0; }
+  .gap .value { color:var(--truth); }
+  .phase { flex:1.2 1 0; }
+  .phase .value { font-size:clamp(0.85rem, 1.2vw, 1.15rem); font-weight:600;
+                  white-space:normal; }
+  .phase .value.armed { color:var(--bad); }
+
+  .panes { flex:1 1 auto; display:flex; gap:1px; min-height:0; }
+  .pane { position:relative; background:var(--panel); min-width:0; }
+  .pane.wide { flex:1.15 1 0; }
+  .pane.detail { flex:1 1 0; }
+  .pane canvas { position:absolute; inset:0; width:100%; height:100%; }
+  .pane .ptitle { position:absolute; top:0.55rem; left:0.8rem; z-index:2;
+    font-size:0.66rem; letter-spacing:0.16em; text-transform:uppercase;
+    color:var(--muted); pointer-events:none; }
+  .pane .ptitle b { color:var(--text); font-weight:600; }
+
+  #altwrap { flex:0 0 22%; position:relative; background:var(--panel);
+             border-top:2px solid var(--edge); }
+  #altwrap canvas { position:absolute; inset:0; width:100%; height:100%; }
+
+  footer { flex:0 0 auto; display:flex; justify-content:space-between;
+    padding:0.3rem 1rem; font-size:0.75rem; color:var(--dim);
+    background:var(--panel); border-top:1px solid var(--edge); }
+  #frozen { color:var(--warn); font-weight:700; letter-spacing:0.1em; }
+  kbd { background:#1b2432; border:1px solid var(--edge); border-radius:3px;
+        padding:0 0.3rem; color:var(--muted); }
+</style>
+</head>
+<body>
+
+<div id="clock">
+  <span class="label">One packet, two builds</span>
+  <span class="value num" id="clockv">--</span>
+  <span class="label" id="clockl">waiting for frames</span>
+</div>
+
+<div id="sides"></div>
+
+<div id="altwrap"><canvas id="ca"></canvas></div>
+
+<footer>
+  <span><span id="frozen" style="display:none">FROZEN &nbsp;&middot;&nbsp; </span
+        >Recorded SITL runs (loop_demo.sh), replayed on one clock aligned at the
+        moment the relay starts injecting type 1033</span>
+  <span><kbd>Space</kbd> freeze &nbsp; <kbd>T</kbd> trails &nbsp;
+        <kbd>F</kbd> fullscreen</span>
+</footer>
+
+<template id="sideT">
+  <div class="side">
+    <div class="title"><b class="lab"></b><div class="sublab"></div></div>
+    <div class="cells">
+      <div class="cell badge"><div class="label">GPS reported quality</div>
+        <div class="value">--</div><div class="sub">waiting</div></div>
+      <div class="cell gap"><div class="label">Truth vs. GPS</div>
+        <div class="value num">--</div><div class="sub">&nbsp;</div></div>
+      <div class="cell alt"><div class="label">Altitude (truth)</div>
+        <div class="value num">--</div><div class="sub">&nbsp;</div></div>
+      <div class="cell phase"><div class="label">Flight</div>
+        <div class="value">waiting</div><div class="sub">&nbsp;</div></div>
+    </div>
+    <div class="panes">
+      <div class="pane wide"><div class="ptitle">Wide &mdash; <b>50 m</b></div>
+        <canvas class="cw"></canvas></div>
+      <div class="pane detail"><div class="ptitle">Detail &mdash; <b>6 m</b>,
+        centred on <b>GPS claim</b></div><canvas class="cd"></canvas></div>
+    </div>
+  </div>
+</template>
+
+<script>
+"use strict";
+const META = /*__META__*/null;          // filled in by demo_split.py
+const M_PER_DEG = 111320.0;             // same constant as parse_sitl_log.py
+const WIDE_SPAN = 50, DETAIL_SPAN = 6, TRAIL_MAX = 3200;
+const PHASES = {
+  startup: "waiting for the chain",
+  clean:   "PHASE 1 — clean corrections, holding",
+  attack:  "PHASE 2 — correction stream compromised",
+  goto:    "PHASE 3 — navigating to a waypoint",
+  land:    "landing",
+};
+const QUALITY = {
+  0: ["NO FIX", "bad"], 1: ["SINGLE", "warn"], 2: ["DGPS", "warn"],
+  3: ["PPS", "warn"], 4: ["RTK FIXED", "good"], 5: ["RTK FLOAT", "warn"],
+  6: ["DEAD RECKONING", "bad"],
+};
+let showTrails = true, frozen = false;
+let shared = null;                      // latest combined frame {T, start, end}
+
+// --- drawing primitives (same conventions as demo_view.html) ---------------
+function fit(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const r = canvas.getBoundingClientRect();
+  const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w: r.width, h: r.height };
+}
+function gridStep(scale) {
+  for (const s of [0.25, 0.5, 1, 2, 5, 10, 25, 50]) if (s * scale >= 70) return s;
+  return 100;
+}
+function drawGrid(ctx, w, h, c, scale) {
+  const step = gridStep(scale);
+  const hw = w / 2 / scale, hh = h / 2 / scale;
+  ctx.lineWidth = 1;
+  for (let e = Math.ceil((c.e - hw) / step) * step; e <= c.e + hw; e += step) {
+    const x = w / 2 + (e - c.e) * scale;
+    ctx.strokeStyle = Math.abs(e) < step / 4 ? "#2b3648" : "#1a2231";
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  for (let n = Math.ceil((c.n - hh) / step) * step; n <= c.n + hh; n += step) {
+    const y = h / 2 - (n - c.n) * scale;
+    ctx.strokeStyle = Math.abs(n) < step / 4 ? "#2b3648" : "#1a2231";
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+  return step;
+}
+function drawScaleBar(ctx, w, h, scale, step) {
+  const len = step * scale, x = 14, y = h - 18;
+  ctx.strokeStyle = "#7d8da5"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x, y - 5); ctx.lineTo(x, y); ctx.lineTo(x + len, y);
+  ctx.lineTo(x + len, y - 5); ctx.stroke();
+  ctx.fillStyle = "#7d8da5"; ctx.font = "12px ui-monospace, Consolas, monospace";
+  ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+  ctx.fillText(step >= 1 ? step + " m" : step.toFixed(2) + " m", x, y - 8);
+}
+function px(w, h, c, scale, p) {
+  return { x: w / 2 + (p.e - c.e) * scale, y: h / 2 - (p.n - c.n) * scale };
+}
+function drawTrail(ctx, w, h, c, scale, all, colour, maxPts) {
+  if (!showTrails || all.length < 2) return;
+  const pts = maxPts && all.length > maxPts ? all.slice(-maxPts) : all;
+  ctx.lineWidth = 2; ctx.lineJoin = "round";
+  for (let i = 1; i < pts.length; i++) {
+    const a = px(w, h, c, scale, pts[i - 1]), b = px(w, h, c, scale, pts[i]);
+    ctx.globalAlpha = 0.08 + 0.5 * (i / pts.length);
+    ctx.strokeStyle = colour;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+const LABEL_DY = { gps: -15, truth: 0, square: 15, diamond: 15 };
+function drawMarker(ctx, p, kind, colour, label) {
+  ctx.strokeStyle = colour; ctx.fillStyle = colour; ctx.lineWidth = 2;
+  if (kind === "square") ctx.strokeRect(p.x - 7, p.y - 7, 14, 14);
+  else if (kind === "diamond") {
+    ctx.beginPath(); ctx.moveTo(p.x, p.y - 9); ctx.lineTo(p.x + 9, p.y);
+    ctx.lineTo(p.x, p.y + 9); ctx.lineTo(p.x - 9, p.y); ctx.closePath(); ctx.stroke();
+  } else if (kind === "gps") {
+    ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(p.x - 14, p.y); ctx.lineTo(p.x - 4, p.y); ctx.moveTo(p.x + 4, p.y); ctx.lineTo(p.x + 14, p.y);
+    ctx.moveTo(p.x, p.y - 14); ctx.lineTo(p.x, p.y - 4); ctx.moveTo(p.x, p.y + 4); ctx.lineTo(p.x, p.y + 14);
+    ctx.stroke();
+  } else if (kind === "truth") {
+    ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  if (label) {
+    ctx.font = "600 12px 'Segoe UI', system-ui, sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(label, p.x + 18, p.y + (LABEL_DY[kind] || 0));
+  }
+}
+function drawOffFrame(ctx, w, h, p, metres) {
+  const m = 24, cx = w / 2, cy = h / 2;
+  // Top margin clears the pane title, which the arrow otherwise sits on.
+  const x = Math.max(m, Math.min(w - m, p.x)), y = Math.max(m + 26, Math.min(h - m - 30, p.y));
+  ctx.save(); ctx.translate(x, y); ctx.rotate(Math.atan2(p.y - cy, p.x - cx));
+  ctx.fillStyle = "#ffb340";
+  ctx.beginPath(); ctx.moveTo(13, 0); ctx.lineTo(-7, -9); ctx.lineTo(-7, 9); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = "#ffb340"; ctx.font = "600 12px 'Segoe UI', system-ui, sans-serif";
+  const right = x > w - m * 2;
+  ctx.textAlign = right ? "right" : "left"; ctx.textBaseline = "middle";
+  ctx.fillText("actually here — " + metres.toFixed(1) + " m off frame", x + (right ? -20 : 20), y);
+}
+function drawGapLine(ctx, a, b, metres) {
+  ctx.save(); ctx.strokeStyle = "#e6edf7"; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.setLineDash([]);
+  if (metres !== null) {
+    const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+    const mx = (a.x + b.x) / 2 - (dy / len) * 22, my = (a.y + b.y) / 2 + (dx / len) * 22;
+    const text = metres.toFixed(2) + " m";
+    ctx.font = "700 15px ui-monospace, Consolas, monospace";
+    const tw = ctx.measureText(text).width;
+    ctx.fillStyle = "rgba(11,14,19,0.85)"; ctx.fillRect(mx - tw / 2 - 6, my - 10, tw + 12, 20);
+    ctx.fillStyle = "#e6edf7"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(text, mx, my);
+  }
+  ctx.restore();
+}
+
+// --- one side of the screen -------------------------------------------------
+class Side {
+  constructor(key, meta, accent) {
+    this.key = key; this.meta = meta || {}; this.accent = accent;
+    const el = document.getElementById("sideT").content.firstElementChild.cloneNode(true);
+    el.style.setProperty("--accent", accent);
+    el.querySelector(".lab").textContent = this.meta.label || key;
+    el.querySelector(".sublab").textContent = this.meta.sub || "";
+    document.getElementById("sides").appendChild(el);
+    this.el = el;
+    this.cw = el.querySelector(".cw"); this.cd = el.querySelector(".cd");
+    this.reset();
+  }
+  reset() {
+    this.frame = null; this.origin = null; this.originFromHold = false;
+    this.trails = { truth: [], gps: [] }; this.detCentre = null;
+    this.qv = null; this.qSince = null; this.alts = [];
+  }
+  toNE(p) {
+    if (!p || !this.origin) return null;
+    return { n: (p.lat - this.origin.lat) * M_PER_DEG,
+             e: (p.lon - this.origin.lon) * M_PER_DEG * Math.cos(this.origin.lat * Math.PI / 180) };
+  }
+  agl(f) {
+    if (!f || !f.truth || this.meta.ground == null) return null;
+    return f.truth.h - this.meta.ground;
+  }
+  take(f, T) {
+    if (!f) { this.frame = null; return; }
+    // Pin the projection origin to the commanded hold point. If the window
+    // opens before the hold is known, start on truth and re-pin (dropping the
+    // trails) the moment the hold appears, so N/E stay "metres from where it
+    // was told to be" on both sides.
+    if (f.hold && !this.originFromHold) {
+      this.origin = { lat: f.hold.lat, lon: f.hold.lon }; this.originFromHold = true;
+      this.trails = { truth: [], gps: [] }; this.detCentre = null;
+    } else if (!this.origin && f.truth) {
+      this.origin = { lat: f.truth.lat, lon: f.truth.lon };
+    }
+    const fresh = !this.frame || f.t !== this.frame.t;
+    this.frame = f;
+    if (fresh) {
+      const t = this.toNE(f.truth), g = this.toNE(f.gps);
+      if (t) { this.trails.truth.push(t); if (this.trails.truth.length > TRAIL_MAX) this.trails.truth.shift(); }
+      if (g) { this.trails.gps.push(g); if (this.trails.gps.length > TRAIL_MAX) this.trails.gps.shift(); }
+    }
+    const a = this.agl(f);
+    if (a !== null) this.alts.push({ T, a });
+  }
+  stale() { const f = this.frame; return !!(f && f.gps_age !== null && f.gps_age > 2.0); }
+
+  header() {
+    const f = this.frame, el = this.el, stale = this.stale();
+    const badge = el.querySelector(".badge"), bv = badge.querySelector(".value"),
+          bs = badge.querySelector(".sub");
+    if (!f || !f.gps) {
+      badge.className = "cell badge"; bv.textContent = "--"; bs.textContent = "waiting";
+      this.qv = null; this.qSince = null;
+    } else {
+      const [text, cls] = QUALITY[f.gps.q] || ["Q=" + f.gps.q, "warn"];
+      if (f.gps.q !== this.qv) { this.qv = f.gps.q; this.qSince = f.t; }
+      badge.className = "cell badge " + (stale ? "bad" : cls);
+      bv.textContent = stale ? "NO DATA" : text;
+      bs.textContent = stale ? "GPS feed dead " + f.gps_age.toFixed(0) + " s"
+                             : "held " + Math.max(0, f.t - this.qSince).toFixed(0) + " s · " + f.gps.ns + " sats";
+    }
+    const gv = el.querySelector(".gap .value"), gs = el.querySelector(".gap .sub");
+    const t = this.toNE(f && f.truth), g = this.toNE(f && f.gps);
+    if (t && g) {
+      gv.textContent = Math.hypot(t.n - g.n, t.e - g.e).toFixed(2) + " m";
+      gv.style.color = stale ? "var(--dim)" : "var(--truth)";
+      gs.textContent = stale ? "last known" : " ";
+    } else { gv.textContent = "--"; gs.textContent = " "; }
+
+    const av = el.querySelector(".alt .value"), as = el.querySelector(".alt .sub");
+    const a = this.agl(f);
+    av.textContent = a === null ? "--" : Math.max(0, a).toFixed(1) + " m";
+    as.textContent = a === null ? " " : (a < 0.3 && this.alts.some(p => p.a > 2)) ? "on the ground" : " ";
+
+    // The phase is the flight SCRIPT's schedule, read off flight.log, and the
+    // script keeps announcing "navigating to a waypoint" after the GPS is gone
+    // and the autopilot has taken over. On a dead feed say what the data says
+    // and demote the script's phase to the subline, so the screen never claims
+    // a grounded aircraft is navigating.
+    const ph = el.querySelector(".phase .value"), ps = el.querySelector(".phase .sub");
+    const scripted = PHASES[(f && f.phase) || "startup"] || "--";
+    if (stale && f && f.phase !== "land") {
+      ph.textContent = "GPS LOST — autopilot on its own";
+      ps.textContent = "script: " + scripted.replace(/ —.*/, "");
+      ph.classList.add("armed");
+    } else {
+      ph.textContent = scripted; ps.textContent = " ";
+      ph.classList.toggle("armed", !!(f && f.armed));
+    }
+  }
+
+  drawPane(canvas, centre, span, opts) {
+    const { ctx, w, h } = fit(canvas);
+    ctx.clearRect(0, 0, w, h);
+    if (!centre) {
+      ctx.fillStyle = "#4a586e"; ctx.font = "14px 'Segoe UI', system-ui, sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("waiting for a position…", w / 2, h / 2); return;
+    }
+    const f = this.frame, scale = Math.min(w, h) / span;
+    const step = drawGrid(ctx, w, h, centre, scale);
+    const truth = this.toNE(f && f.truth), gps = this.toNE(f && f.gps);
+    const hold = this.toNE(f && f.hold), wp = this.toNE(f && f.wp);
+    drawTrail(ctx, w, h, centre, scale, this.trails.truth, "#ffb340", opts.trail);
+    drawTrail(ctx, w, h, centre, scale, this.trails.gps, "#4dd2ff", opts.trail);
+    if (hold) drawMarker(ctx, px(w, h, centre, scale, hold), "square", "#7d8da5", opts.labels ? "commanded hold" : "");
+    if (wp) drawMarker(ctx, px(w, h, centre, scale, wp), "diamond", "#7d8da5", opts.labels ? "waypoint" : "");
+    if (truth && gps) {
+      const d = Math.hypot(truth.n - gps.n, truth.e - gps.e);
+      if (d > 0.05) drawGapLine(ctx, px(w, h, centre, scale, gps), px(w, h, centre, scale, truth), opts.labels ? d : null);
+    }
+    if (gps) drawMarker(ctx, px(w, h, centre, scale, gps), "gps", this.stale() ? "#4a586e" : "#4dd2ff",
+                        opts.labels ? (this.stale() ? "last GPS claim" : "GPS claims") : "");
+    if (truth) {
+      const p = px(w, h, centre, scale, truth);
+      if (p.x < 20 || p.x > w - 20 || p.y < 20 || p.y > h - 20)
+        drawOffFrame(ctx, w, h, p, Math.hypot(truth.n - centre.n, truth.e - centre.e));
+      else drawMarker(ctx, p, "truth", "#ffb340", opts.labels ? "actually here" : "");
+    }
+    drawScaleBar(ctx, w, h, scale, step);
+  }
+
+  render() {
+    const f = this.frame;
+    const truth = this.toNE(f && f.truth), gps = this.toNE(f && f.gps), hold = this.toNE(f && f.hold);
+    let wide = null;
+    if (hold) wide = { n: hold.n + 15, e: hold.e }; else if (truth) wide = truth; else if (gps) wide = gps;
+    if (gps) {
+      if (!this.detCentre) this.detCentre = { n: gps.n, e: gps.e };
+      else {
+        const c = this.detCentre;
+        c.n += (gps.n - c.n) * 0.06; c.e += (gps.e - c.e) * 0.06;
+        const dn = gps.n - c.n, de = gps.e - c.e, lag = Math.hypot(dn, de), MAX = DETAIL_SPAN / 5;
+        if (lag > MAX) { c.n += dn * (1 - MAX / lag); c.e += de * (1 - MAX / lag); }
+      }
+    }
+    this.drawPane(this.cw, wide, WIDE_SPAN, { labels: false });
+    this.drawPane(this.cd, this.detCentre || truth, DETAIL_SPAN, { labels: true, trail: 60 });
+  }
+}
+
+const L = new Side("L", META && META.L, "#c4b5fd");
+const R = new Side("R", META && META.R, "#f9a8d4");
+
+// --- shared altitude strip: the abort reads as a descent here ----------------
+function drawAlt() {
+  const { ctx, w, h } = fit(document.getElementById("ca"));
+  ctx.clearRect(0, 0, w, h);
+  if (!shared) return;
+  const padL = 46, padR = 16, padT = 22, padB = 22;
+  const T0 = shared.start, T1 = shared.end;
+  const all = L.alts.concat(R.alts);
+  const amax = Math.max(5, ...all.map(p => p.a)) * 1.15;
+  const X = T => padL + (T - T0) / (T1 - T0) * (w - padL - padR);
+  const Y = a => h - padB - Math.max(0, a) / amax * (h - padT - padB);
+  ctx.font = "11px ui-monospace, Consolas, monospace"; ctx.fillStyle = "#7d8da5";
+  ctx.strokeStyle = "#1a2231"; ctx.lineWidth = 1;
+  for (const a of [0, 5, 10, 15, 20, 25, 30].filter(a => a < amax)) {
+    ctx.beginPath(); ctx.moveTo(padL, Y(a)); ctx.lineTo(w - padR, Y(a)); ctx.stroke();
+    ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(a + " m", padL - 6, Y(a));
+  }
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillText("ALTITUDE (truth) vs. time from the packet", padL, 4);
+  // the packet
+  ctx.strokeStyle = "#ef4444"; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(X(0), padT - 6); ctx.lineTo(X(0), h - padB); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = "#ef4444"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillText("packet", X(0), h - padB + 4);
+  ctx.fillStyle = "#7d8da5";
+  for (let t = Math.ceil(T0 / 30) * 30; t <= T1; t += 30)
+    if (t !== 0) ctx.fillText((t > 0 ? "+" : "") + t + " s", X(t), h - padB + 4);
+  // Labels staggered (left above its line, right below): before the packet
+  // both aircraft hold at the same altitude and the lines coincide.
+  for (const [s, dy] of [[L, -10], [R, 12]]) {
+    if (s.alts.length < 2) continue;
+    ctx.strokeStyle = s.accent; ctx.lineWidth = 2.5; ctx.beginPath();
+    s.alts.forEach((p, i) => i ? ctx.lineTo(X(p.T), Y(p.a)) : ctx.moveTo(X(p.T), Y(p.a)));
+    ctx.stroke();
+    const last = s.alts[s.alts.length - 1];
+    ctx.fillStyle = s.accent; ctx.font = "600 12px 'Segoe UI', system-ui, sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(s.meta.label || s.key, Math.min(X(last.T) + 8, w - 150), Y(last.a) + dy);
+  }
+}
+
+function clock() {
+  const v = document.getElementById("clockv"), l = document.getElementById("clockl");
+  if (!shared) return;
+  const T = shared.T;
+  if (T < 0) { v.textContent = "T−" + Math.ceil(-T) + " s"; v.className = "value num"; l.textContent = "until the packet"; }
+  else { v.textContent = "T+" + T.toFixed(0) + " s"; v.className = "value num hit"; l.textContent = "since the packet"; }
+}
+
+let lastT = null;
+function onFrame(f) {
+  if (frozen) return;
+  if (lastT !== null && f.T < lastT) { L.reset(); R.reset(); }   // replay looped
+  lastT = f.T; shared = f;
+  L.take(f.L, f.T); R.take(f.R, f.T);
+}
+
+function loop() {
+  clock(); L.header(); R.header(); L.render(); R.render(); drawAlt();
+  requestAnimationFrame(loop);
+}
+
+document.addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  if (e.key === " ") { e.preventDefault(); frozen = !frozen;
+    document.getElementById("frozen").style.display = frozen ? "" : "none"; }
+  else if (k === "t") showTrails = !showTrails;
+  else if (k === "f") { if (document.fullscreenElement) document.exitFullscreen();
+                        else document.documentElement.requestFullscreen(); }
+});
+
+const es = new EventSource("/stream");
+es.onmessage = (ev) => { try { onFrame(JSON.parse(ev.data)); } catch (e) {} };
+loop();
+</script>
+</body>
+</html>
