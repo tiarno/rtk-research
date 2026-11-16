@@ -723,8 +723,11 @@ The section that separates this from a bug writeup. Tell it as failures.
   response. Debian's tracker: `<no-dsa>`/`<postponed>`, every release
   vulnerable. Release branch untouched since 2020-12-29.
 - **"Wait for the patch" is not advice on an unmaintained project.**
-- Show the fix: the clamp in `decode_type1033`, `1007` and `1008`, **filed as
-  PR #801** — the slide reads *"here is the fix, filed, still unmerged."*
+- Show the fix: **five lines** in `decode_type1033`, one `if (x>31) x=31;` per
+  descriptor length. **PR #801** clamps `1007` and `1008` the same way: eight
+  code lines across three decoders (11 additions with comments, measured with
+  `gh pr diff 801` on 2026-11-16). The slide reads *"here is the fix, filed,
+  still unmerged."*
   Re-check #801's state the week of the talk.
 - For operators, in priority order:
   1. Set the base coordinate **manually** where you can — the attack needs the
