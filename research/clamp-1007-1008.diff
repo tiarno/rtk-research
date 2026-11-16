@@ -1,0 +1,23 @@
+diff --git a/src/rtcm3.c b/src/rtcm3.c
+index 1aa9298..1b4978a 100644
+--- a/src/rtcm3.c
++++ b/src/rtcm3.c
+@@ -527,6 +527,8 @@ static int decode_type1007(rtcm_t *rtcm)
+     /* test station ID */
+     if (!test_staid(rtcm,staid)) return -1;
+     
++    /* clamp descriptor length to the staging buffer capacity (32B, read loop caps at 31) */
++    if (n>31) n=31;
+     sprintf(rtcm->sta.name,"%04d",staid);
+     strncpy(rtcm->sta.antdes,des,n); rtcm->sta.antdes[n]='\0';
+     rtcm->sta.antsetup=setup;
+@@ -564,6 +566,9 @@ static int decode_type1008(rtcm_t *rtcm)
+     /* test station ID */
+     if (!test_staid(rtcm,staid)) return -1;
+     
++    /* clamp descriptor lengths to the staging buffers capacity (32B, read loops cap at 31) */
++    if (n>31) n=31;
++    if (m>31) m=31;
+     sprintf(rtcm->sta.name,"%04d",staid);
+     strncpy(rtcm->sta.antdes,des,n); rtcm->sta.antdes[n]='\0';
+     rtcm->sta.antsetup=setup;

@@ -1,6 +1,91 @@
 # Handoff Notes
 
-**Session date:** 2026-08-31
+**Session date:** 2026-11-16
+
+## 2026-11-16: external review absorbed, article live, repo public, PR widened
+
+First session since the Windows-to-Linux migration (Linux Mint, no WSL). An
+outside review of the published article prompted a fact-check against this
+repo, NVD, Debian and the source, and a round of fixes.
+
+**What the review got right, checked:**
+
+- **There is a CVE.** `CVE-2026-56786`, published by VulnCheck 2026-06-25:
+  CVSS 9.3, described as possible "arbitrary code execution". Debian's tracker
+  has it `<no-dsa>`/`<postponed>` (Minor) on trixie and bookworm, bug 1140766,
+  `2.4.3.b34+dfsg-1` vulnerable in every release. The article's Part 14 had
+  implied no identifier existed. Now cited, with the argument that NVD
+  overstates and Debian understates.
+- **Persistence.** The article said one message ruins accuracy "for as long
+  as you like". This README already said the opposite (the next genuine 1005
+  restores `sta.pos`; re-inject after every 1005). Article corrected.
+- **The 2 m rung is not universal.** At `n1=211` the grid is `2^(e-20)` where
+  `e` is the binary exponent of |X|. Computed over the globe, area-weighted:
+  ~33% of the surface gets 2 m, ~34% gets 4 m (|X| ≥ 2^22: Madrid, Lagos,
+  Sydney, Auckland), the rest ≤ 1 m (Chicago 7 cm, New Orleans 3 mm). The
+  attacker needs the exponent, not the coordinate, and rough location gives
+  it. Article now has a table by region. Computed, not measured at real
+  stations.
+- **`postpos.c` check** is only `norm(sta.pos,3)>0.0`. Article wording
+  narrowed.
+- **Prose formula** in Part 6 subtracted 31 wrongly; the table was right
+  (208 + bytes − 1). Fixed.
+- **1005 spoofing** needs no bug and works on every vendor. Article now
+  says what 1033 adds: no knowledge of the base coordinate needed, hides in a
+  text message, and it is a kill switch on fortified builds.
+- **Operator mitigation** added: `ant2-postype` set to `llh`/`xyz`, not
+  `rtcm`. Confirmed in `rtksvr.c`: `update_antpos()` only adopts when
+  `refpos==POSOPT_RTCM`.
+
+**Where the review was wrong:** it suggested overflowing into `pos[1]` at
+90°W; any write reaching Y has already zeroed all 8 bytes of X. Its
+remediation recommends the `norm>0` guard it had just shown is useless
+against truncation.
+
+**New measurements** (fresh clone of `rtklib_2.4.3` @ `180043e`, this repo's
+`harness.c` and `check_1007_1008.py`, gcc 13.3, x86_64):
+
+| build | 1007/1008 oversized | 1033 `n1=211` |
+|---|---|---|
+| `-O2 -D_FORTIFY_SOURCE=2` | abort, rc=134, all 3 cases | abort |
+| `-O2 -D_FORTIFY_SOURCE=1` | no abort | **silent corruption**, X → −2694684.0 |
+| `-O2 -U_FORTIFY_SOURCE` | no abort | silent corruption |
+
+Two consequences. 1007/1008, measured harmless to `pos` on 2026-08-09, are
+remote crash triggers on level-2 builds. And level-1 fortification does not
+catch 1033 at all (likely because level 1 checks against the whole object, not the field; not confirmed), so "the
+fortified build aborts" means level 2 or higher.
+
+**PR #801 widened.** Commit `c26c72d` on `tiarno/RTKLIB` `pr/clamp-master`
+clamps `n` in `decode_type1007` and `n`/`m` in `decode_type1008`. Verified on
+that branch (it is `master`, 2.4.2 p13, not 2.4.3): oversized cases abort
+before, run clean after; benign 1007/1008/1033 and the 1033 attack streams
+give identical harness output before and after. The harness needs
+`showmsg(char *...)` instead of `const char *` to compile against `master`.
+The PR body's "out of scope" note for 1007/1008 was replaced. The same
+change for 2.4.3 is `research/clamp-1007-1008.diff`. As of today #801 has
+no comments and #799 has had none since 2026-07-27.
+
+**Article live.** `reachtim.com/articles/gps-certain-and-wrong.html`
+redeployed with all of the above (reachtim commits `9afaf27`..`e5ef46c`).
+Deploys now go through `tools/deploy.sh` in that repo (build, check, FTPS).
+
+**This repo is now public** (2026-11-16). Checked first: gitleaks clean over
+all 52 commits, no firmware binaries in history, `files.zip` in the initial
+import holds only the two fork-network scripts. History is unchanged, so the
+old WSL paths in `.claude/settings.json` and the AI co-author trailers on
+older commits are visible.
+
+**Open:**
+
+- The `rtklib_2.4.3` second PR is still optional and unfiled. It should now
+  carry all three decoders' clamps.
+- Reach M2/RS2+ firmware and `str2str`/`convbin` on the Reach image remain
+  unchecked.
+- To run anything here again: there is no RTKLIB checkout on this machine
+  (the WSL `~/RTKLIB` is gone). Clone `rtklib_2.4.3` and check out `180043e`.
+  The scripts' WSL paths and `.claude/settings.json` are stale.
+- The root README still calls the blog an unpublished draft.
 
 ## 2026-08-31, later: PR #801 filed
 
