@@ -1,17 +1,27 @@
 # Talk outline
 
-> **STATUS: contingent, not a plan of record.** As of 2026-07-31 no talk is
-> committed to — no CFP submitted, no venue, no deadline. This document is kept
-> current because the material is ready and the outline is cheap to maintain,
-> not because a talk is being prepared. The other possible output is the
-> long-form article, published as [The GPS That Was Certain, and Wrong](https://reachtim.com/articles/gps-certain-and-wrong.html), which stands
-> alone and does not need the talk to happen.
+> **STATUS: active, preparing a CFP submission (revived 2026-11-16).** Target:
+> **CackalackyCon, May 2027**, presented solo. Not yet submitted. The CFP
+> window and slot length are **not yet checked**, so the 45-minute format and
+> the 25-minute §CUT below are assumptions until they are. The talk track
+> dropped on 2026-08-31 (see `docs/HANDOFF.md`) is reopened on these terms.
 >
-> The checklist near the end assumes an active submission. **Ignore it unless a
-> talk is actually being pursued again** — its items (hardware to order, demo
-> rehearsal, stage fallbacks) are only binding under a live-demo commitment.
-> The authoritative record of the research itself is
-> [research/README.md](../research/README.md), which is independent of both.
+> **Demo plan: no hardware purchase.** Everything on stage is software the
+> repo already runs: the ArduPilot SITL loop (§7), the side-by-side replay of
+> one packet against both builds (`research/demo_split.py`), and Emlid's own
+> firmware under `qemu-aarch64-static` (§6), shown as recordings where live is
+> risky. The LoRa delivery (§8) is a recorded bench clip, never radiated on
+> stage. Hardware tiers below are kept as a record, not a to-do list.
+>
+> **Claims audited 2026-11-16** (`claim-audit`; fixes in `6a09feb`, `531affb`,
+> `d1f5dae`). Re-run the audit on the abstract before submitting and on the
+> slides before presenting. The checklist near the end is binding again,
+> except its hardware-purchase items.
+>
+> The authoritative record of the research is
+> [research/README.md](../research/README.md). The long-form article,
+> [The GPS That Was Certain, and Wrong](https://reachtim.com/articles/gps-certain-and-wrong.html),
+> stands alone.
 
 **Working title:** *Confidently Wrong: Moving a Drone With a Message About an
 Antenna's Name*
