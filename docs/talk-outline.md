@@ -60,9 +60,8 @@ an unauthenticated broadcast, and the failure is silent by default, not loud.*
 | 7 | **Live demo: packet to propeller** | 8 | The payoff |
 | 8 | Delivering it over the air | 4 | Completes the chain |
 | 9 | The vertical negative, and the defence | 3 | Bounds it + gives the fix |
-| 10 | How I nearly gave the wrong talk | 4 | The differentiator §CUT |
-| 11 | Disclosure, and what to actually do | 3 | Responsibility |
-| 12 | Close | 1 | |
+| 10 | Disclosure, and what to actually do | 3 | Responsibility |
+| 11 | Close | 1 | |
 
 ---
 
@@ -706,32 +705,7 @@ raw text is enough).
 - Which also bounds the attack honestly: a third of the injected error is
   wasted, and on this airframe the effect is horizontal-only.
 
-## 10. How I nearly gave the wrong talk (4 min) §CUT
-
-The section that separates this from a bug writeup. Tell it as failures.
-
-- **113 metres.** The first closed-loop run had the drone wander 113 m. A
-  spectacular result — and entirely my own rig. RTKLIB's real-time path reports
-  no velocity, the estimator was told it was stationary mid-flight, and it
-  fought itself. **With the attack switched off it wandered just as badly.**
-- **The attack that started before the aircraft did.** A timer-armed injection
-  raced the takeoff and won. The "displacement" was a takeoff transient anchored
-  to a lie, and it had the wrong sign. Fixed by letting the aircraft say when
-  it's ready, not a clock.
-- **A build that silently didn't build.** The check tested whether the binary
-  existed, which passes when the *old* one is still there. Cost a full flight
-  and nearly the wrong conclusion.
-- **A retracted finding.** An earlier claim about the fork network was an
-  artifact of a truncated crawl. Withdrawn in writing.
-- **And one I got wrong in this very talk's research:** I predicted Linux builds
-  would abort. They don't.
-- **The rule that caught the first three:** run the control. Three times
-  something looked exactly like an attack effect and wasn't. The other two were
-  caught by re-checking a claim against the data.
-
-*Any test where you cannot switch the attack off is not a test.*
-
-## 11. Disclosure, and what to do (3 min)
+## 10. Disclosure, and what to do (3 min)
 
 - FuzzingLabs found and reported the overflow, along with three similar ones,
   on 2026-06-09. Credit them plainly and move on. This talk follows where the
@@ -773,7 +747,7 @@ into the baseline emits no trace at all; it increments a message counter.
 better closing note for the defence section than "nothing is logged," and it is
 the one thing on the list a vendor could fix in an afternoon.
 
-## 12. Close (1 min)
+## 11. Close (1 min)
 
 Callback to the cold open. Re-show the frozen frame: aircraft 1.39 m off,
 indicator still green, telemetry still saying *arrived*.
@@ -792,7 +766,7 @@ signs."*
 
 ## Pre-submission checklist
 
-- [x] File the RTKLIB patch PR (§11 slide depends on it) — PR #801, open
+- [x] File the RTKLIB patch PR (§10 slide depends on it) — PR #801, open
 - [x] `offsetof(sta_t,pos)` on ARM — **464 on all six ABIs checked** (x86-64,
       armhf, armel, arm64, riscv64, ppc64), so the payload transfers unchanged
       across those six. Caveats added 2026-11-17: i386 puts `pos` at 460 (n1
