@@ -14,7 +14,9 @@
 > stage. Hardware tiers below are kept as a record, not a to-do list.
 >
 > **Claims audited 2026-11-16** (`claim-audit`; fixes in `6a09feb`, `531affb`,
-> `d1f5dae`). Re-run the audit on the abstract before submitting and on the
+> `d1f5dae`). **Synced 2026-11-17** with the rewritten article (reachtim
+> `ea16856`): i386 and big-endian caveats, the eight-line fix across #801,
+> touchdown speed, and plain FuzzingLabs credit. Re-run the audit on the abstract before submitting and on the
 > slides before presenting. The checklist near the end is binding again,
 > except its hardware-purchase items.
 >
@@ -112,7 +114,12 @@ Let it happen. Then start the talk. **Do not explain yet.**
 - Show `sta_t`: seven 64-byte text fields, three ints, and then — 464 bytes in —
   `double pos[3]`, the base station's own coordinates. `rectype` (the field
   that gets oversized) starts at offset 256, so the gap to `pos` is a fixed
-  208 bytes on every ABI checked (x86-64, armhf, armel, arm64, riscv64, ppc64).
+  208 bytes on six ABIs checked (x86-64, armhf, armel, arm64, riscv64, ppc64).
+  i386 is the exception: `double` aligns to 4 there, `pos` sits at 460, and
+  every `n1` is 4 lower. On big-endian targets (ppc64, s390x) the offset holds
+  but the first bytes zeroed are sign and exponent, so the coordinate collapses
+  to about 0 (computed, not run). Have both ready for Q&A; don't put them on
+  the slide.
 - **The twist:** the spill writes *zeros*, not attacker bytes. You cannot say
   "the base is at the North Pole." You can only erase. Mechanically: only the
   first 31 bytes of the declared text are ever read into the staging buffer;
@@ -161,12 +168,12 @@ The most transferable insight in the talk.
 - **The line:** this is not a safety check somebody forgot to switch on. The
   check is a glibc feature; those are Embarcadero builds against the Windows
   CRT, which import no `*_chk` at all. *It was never on the menu.*
-- **Then the part I got wrong.** I expected Linux to be the safe side. Debian
-  ships RTKLIB 2.4.3 b34 for **12 architectures** — and the armhf build imports
-  no `*_chk` either. On ARM. Debian's hardening policy nominally applies
-  fortification; this package's import table shows it never took effect (the
-  likely cause, upstream makefiles overriding `CFLAGS`, is unconfirmed).
-- **Conclusion, stronger for having been surprised:** the abort is what you get
+- **Linux isn't the safe side either.** Debian ships RTKLIB 2.4.3 b34 for
+  **12 architectures**, and the armhf build imports no `*_chk`. Debian's
+  hardening policy nominally applies fortification; this package's import
+  table shows it never took effect (the likely cause, upstream makefiles
+  overriding `CFLAGS`, is unconfirmed).
+- **So:** the abort is what you get
   by compiling it yourself with `_FORTIFY_SOURCE=2` or higher (level 1 still
   corrupts silently). Of everything measured, **one** vendor line ships that
   way: Emlid M2/RS2 firmware from v29.0 (built 2022-07-14) onward imports
@@ -183,7 +190,7 @@ The most transferable insight in the talk.
   | GPS status | RTK FIXED → **none**, 87.5 s | **RTK FIXED the whole flight** |
   | errors logged | 4 | **0** |
   | failsafe | EKF variance → **auto LAND**, 4.0 s after GPS loss (~8 s after the packet; ArduCopter then holds 4 s before descending) | **none** |
-  | outcome | on the ground 33 s after GPS loss (~37 s after the packet), 0.5 m/s | flew the leg, **reported arrival, 1.4 m from truth** |
+  | outcome | on the ground 33 s after GPS loss (~37 s after the packet), touching down at 0.5 m/s | flew the leg, **reported arrival, 1.4 m from truth** |
 
   **The build that crashes gives the vehicle something to act on. The silent
   builds give it a confident wrong answer and nothing to trigger on.**
@@ -226,7 +233,8 @@ wrong lesson and someone will leave with it. Turn immediately:
 
 - **The line:** *"if what you want is a drone in a lake, the hardened build is
   the better tool."* Hardening swaps a silent integrity attack for a loud
-  availability one. **It is not a fix. The fix is the five-line clamp.**
+  availability one. **It is not a fix. The fix is the clamp: five lines for
+  1033, eight across the three decoders in #801.**
 - *Possible demo beat:* this is a second, cheaper live run — no RF needed, and
   it ends with the aircraft landing itself instead of flying to the wrong place.
   Consider it as the fallback demo if the RF path is unreliable on the floor.
@@ -725,10 +733,9 @@ The section that separates this from a bug writeup. Tell it as failures.
 
 ## 11. Disclosure, and what to do (3 min)
 
-- FuzzingLabs found and reported the overflow, June 2026. Credit clearly. What
-  they didn't chase is where the spill lands — they framed it as memory
-  corruption and never mention the base coordinates; their PoC drives a field
-  that can't reach them.
+- FuzzingLabs found and reported the overflow, along with three similar ones,
+  on 2026-06-09. Credit them plainly and move on. This talk follows where the
+  spill lands; don't frame that as something they missed.
 - **CVE-2026-56786** (VulnCheck, 2026-06-25). Issue #799 open, no maintainer
   response. Debian's tracker: `<no-dsa>`/`<postponed>`, every release
   vulnerable. Release branch untouched since 2020-12-29.
@@ -791,8 +798,8 @@ signs."*
       across those six. Caveats added 2026-11-17: i386 puts `pos` at 460 (n1
       is 4 lower), and on big-endian targets (ppc64, s390x) the same overflow
       zeroes sign and exponent, so there is no metre-scale rung there.
-      `research/check_offsets.py`. Strengthens §4: `n1=211` is not an x86-64
-      number, it is the number
+      `research/check_offsets.py`. Strengthens §4: `n1=211` holds on all six
+      (`n1=207` on i386)
 - [x] Build the demo visuals: map, two icons, persistent FIXED indicator —
       `research/demo_view.py`, verified against a live run 2026-07-27
 - [x] Record the fallback demo video — *superseded, and better:* every live run
@@ -839,8 +846,8 @@ signs."*
 | Question | Answer |
 |---|---|
 | "Isn't this just a crash?" | Not on most builds measured — Windows official, demo5, Debian, Reach Plus, M2/RS2 before v29.0. Show the exit-0 evidence. Current M2/RS2 firmware does abort: that's §5b. Then turn it round: the crash is the outcome you'd *want*, because the vehicle notices. Silence is the failure nothing is built to catch. |
-| "Surely a crash mid-flight is worse than 2 m of error?" | Flown both. Crash: EKF failsafe 4.0 s after GPS loss (~8 s after the packet), auto-LAND, on the ground 33 s after GPS loss (~37 s after the packet) at 0.5 m/s, 4 errors logged. Corruption: zero errors, RTK FIXED throughout, flew the leg and reported arrival 1.4 m off. Then §5b: the crash is worse in a different way — it's a forced landing on the attacker's schedule. |
-| "So just compile it with `_FORTIFY_SOURCE`?" | First, it has to be level 2 or higher: level 1 still corrupts silently (measured 2026-11-16). And then no — that's §5b. You'd be trading a silent 2 m error for a forced landing about 10 m (in still air) from wherever the attacker chose. Both are attacks. The fix is the five-line clamp. |
+| "Surely a crash mid-flight is worse than 2 m of error?" | Flown both. Crash: EKF failsafe 4.0 s after GPS loss (~8 s after the packet), auto-LAND, on the ground 33 s after GPS loss (~37 s after the packet), touching down at 0.5 m/s, 4 errors logged. Corruption: zero errors, RTK FIXED throughout, flew the leg and reported arrival 1.4 m off. Then §5b: the crash is worse in a different way — it's a forced landing on the attacker's schedule. |
+| "So just compile it with `_FORTIFY_SOURCE`?" | First, it has to be level 2 or higher: level 1 still corrupts silently (measured 2026-11-16). And then no — that's §5b. You'd be trading a silent 2 m error for a forced landing about 10 m (in still air) from wherever the attacker chose. Both are attacks. The fix is the length clamp (PR #801). |
 | "How precisely can you place the forced landing?" | 10.1 m and 10.8 m drift measured in two runs (2026-07-31, 2026-11-16), 15 m hover, **zero wind** — a floor, not a bound. Enough for a lake, not for a lane of traffic. Don't let it be quoted as ±10 m. |
 | "2 metres is nothing." | Nobody buys RTK to be within 2 m. It destroys the product's entire value while reporting maximum confidence. |
 | "Did you pick a lucky length?" | Yes — originally. That's §4. The demo now runs the rung whose error is bounded by one quantum anywhere: 2 m for about a third of the Earth, 4 m at most. |
