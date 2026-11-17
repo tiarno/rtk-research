@@ -1290,6 +1290,10 @@ Environment traps worth remembering:
   worth stating precisely: this measures the **ABI**, via two compilers that
   agree, not the specific binary Debian shipped. A build using a non-default
   packing or a patched header would not be covered, and none was checked.
+  **Reopened 2026-11-17 for two targets:** i386 aligns `double` to 4, so `pos`
+  is at 460 and every `n1` is 4 lower (gcc `-m32`). Big-endian targets (ppc64,
+  s390x) keep 464 but zero sign and exponent first, collapsing X to about 0
+  (computed, not run). See research/README.md "Byte order changes the effect".
 - Windows measurement covers the decode and coordinate corruption, not the
   real-time adoption — the GUI apps were not driven.
 - The vertical result is specific to a multirotor with a barometer. A vehicle

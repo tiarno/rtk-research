@@ -716,12 +716,53 @@ is put to it as a `_Static_assert` and the answer is read off compile success.
 Identical on all six, because every ABI here aligns `double` to 8 bytes. The
 one worth calling out is **armel**: soft-float, no FPU in the ABI at all, and
 still 8-byte alignment, because that is what AAPCS specifies rather than a
-property of the hardware. The obvious way for this to have differed — a target
-that aligns `double` to 4 — does not occur among the architectures Debian
-ships RTKLIB for.
+property of the hardware.
 
-So `n1=211` is not an x86-64 number. It is the number, on every architecture
-checked.
+**i386 is the exception.** The i386 System V ABI aligns a `double` inside a
+struct to 4 bytes, so the four bytes of padding after `deltype` disappear and
+`pos` sits at **460**, not 464. Debian builds RTKLIB for i386 (see the
+architecture list under "The distro package is unfortified too"), so this is a
+real target. Measured 2026-11-17 with gcc `-m32` and `_Static_assert` on a copy
+of `sta_t` through `pos` (the i386 libc headers needed to compile the real
+`rtklib.h` were not installed): `-m32` gives 460, and `-m32 -malign-double`
+gives 464. On i386 every `n1` threshold in this document is **4 lower**: the
+`n1=211` rung is `n1=207`.
+
+| target | `rectype` | `pos` |
+|---|---|---|
+| i386 (System V, gcc default) | 256 | **460** |
+| i386 with `-malign-double` | 256 | 464 |
+
+So `n1=211` is not an x86-64 number. It is the number on every architecture
+checked except i386, where it is `n1=207`.
+
+### Byte order changes the effect, not the offset
+
+The rungs above assume a little-endian target, where the first bytes the
+overflow reaches are the low-order end of the mantissa. On a big-endian target
+the same first bytes are the **sign and exponent**. The `ppc64` row in the
+table above is big-endian (`powerpc64-linux-gnu`), and Debian also builds
+RTKLIB for big-endian **s390x**, whose ABI aligns `double` to 8, so `pos`
+should sit at 464 there too. That s390x offset comes from the ABI spec; no
+s390x compiler was available to measure it.
+
+The same zeroed prefix applied to the same base X = -2694685.4730, with the
+bytes in big-endian order:
+
+| `n1` | bytes of `pos[0]` zeroed | little-endian `pos[0]` | big-endian `pos[0]` |
+|---|---|---|---|
+| 208 | 1 | -2694685.4730 | 2.3e-307 |
+| 209 | 2 | -2694685.4730 | 7.8e-310 |
+| 210 | 3 | -2694685.4688 | 3.1e-313 |
+| 211 | 4 | -2694684.0000 | 1.6e-314 |
+
+Every rung puts the base X coordinate at effectively zero, about 2,700 km from
+the real base. A big-endian build has no quiet metre-scale rung: the smallest
+overflow that reaches `pos` at all destroys the coordinate. These values are
+computed from the IEEE-754 layout, not measured through the decoder on
+big-endian hardware, and no rover has been run against them. The expected
+outcome is a lost or rejected solution (an availability failure), not a
+confident wrong fix.
 
 *Control:* the same offsets read independently with the system gcc, which
 reproduces the 464 measured elsewhere in this repo by other means. `zig cc`

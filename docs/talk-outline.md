@@ -787,7 +787,10 @@ signs."*
 
 - [x] File the RTKLIB patch PR (§11 slide depends on it) — PR #801, open
 - [x] `offsetof(sta_t,pos)` on ARM — **464 on all six ABIs checked** (x86-64,
-      armhf, armel, arm64, riscv64, ppc64), so the payload transfers unchanged.
+      armhf, armel, arm64, riscv64, ppc64), so the payload transfers unchanged
+      across those six. Caveats added 2026-11-17: i386 puts `pos` at 460 (n1
+      is 4 lower), and on big-endian targets (ppc64, s390x) the same overflow
+      zeroes sign and exponent, so there is no metre-scale rung there.
       `research/check_offsets.py`. Strengthens §4: `n1=211` is not an x86-64
       number, it is the number
 - [x] Build the demo visuals: map, two icons, persistent FIXED indicator —
